@@ -291,6 +291,34 @@ test('an agent keeps Claude Code’s row less the blank line above it; Skill and
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
+// The first tool row after a prompt or a reply owns the blank line above it; the rows after
+// it in the run own none, an agent's included.
+test('a tool row that opens a run owns the blank line above it, the rows after it none', async ($, on) => {
+  stubEngine(on)
+  const uses = (...ids: string[]) => ids.map(tool_use_id => ({ tool_use_id, tool: 'Bash', input: {} }))
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'fix the build', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: uses('r1', 'r2') },
+      { role: 'user', text: '', toolUses: [], toolResults: [] },
+      { role: 'assistant', text: 'Now an agent.', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: uses('r3', 'r4') },
+    ] as never,
+  }))
+  const row = async (id: string, tool = 'Bash') => {
+    const ui = await $.ui.mount(toolUse(call(tool, { command: 'ls', description: 'dig' }, { tool_use_id: id })))
+    const lines = blankLines(await ui.find({ type: 'Box' }))
+    await ui.unmount()
+
+    return lines
+  }
+
+  expect(await row('r1')).toEqual(['marginTop: 1'])
+  expect(await row('r2')).toEqual([])
+  expect(await row('r3', 'Agent')).toEqual([])
+  expect(await row('r4', 'Agent')).toEqual(['marginTop: -1'])
+})
+
 test('a folded group is one node, an expanded one keeps its rows', async ($, on) => {
   stubEngine(on)
 

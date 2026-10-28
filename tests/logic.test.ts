@@ -15,7 +15,7 @@ import { countdownOf, countdownsOf, limitLabel, meterColor, metersKey, metersOf,
 import { isNewer, starStep, updateNotice } from '../hooks/updates'
 import { deepen, forTheme, gnomeDark, isLightTheme, macDark, resolveLight, toLight, windowsDark } from '../hooks/light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
-import { kindOf, summarize, toolLabel } from '../hooks/tools'
+import { kindOf, runStarts, summarize, toolLabel } from '../hooks/tools'
 import { SKINS } from '../hooks/themes'
 import { inlineRuns, splitBlocks } from '../hooks/blocks'
 import { errorLine, isQuiet, isReadOnlyShell, segmentsOf } from '../hooks/quiet'
@@ -1321,4 +1321,36 @@ test('chart and math cards say when their entrance ends', async () => {
     expect(card, `${name} draws`).not.toBeNull()
     expect(card?.entranceMs ?? 0, `${name} settles only after its last animation ends`).toBeGreaterThanOrEqual(animationEndsMs(card?.source ?? ''))
   }
+})
+
+// The transcript as `$.session.messages()` hands it: one entry per stored block.
+const said = (text: string) => ({ role: 'assistant' as const, text, toolUses: [] })
+const called = (...ids: string[]) => ({ role: 'assistant' as const, text: '', toolUses: ids.map(tool_use_id => ({ tool_use_id, tool: 'Bash', input: {} })) })
+const answered = (text = '') => ({ role: 'user' as const, text, toolUses: [], toolResults: [{ tool_use_id: 'x', text: 'ok', isError: false }] })
+const typed = (text: string) => ({ role: 'user' as const, text, toolUses: [] })
+
+test('a tool call opens a run when what the transcript drew before it is not a tool call', () => {
+  const starts = runStarts([
+    typed('fix the build'),
+    said(''),
+    called('a'),
+    answered(),
+    said(''),
+    called('b', 'c'),
+    answered(),
+    said('Now the tests.'),
+    called('d'),
+    answered(),
+    // A skill's text rides in after its result and is not drawn.
+    typed('Base directory for this skill: /skills/commit'),
+    called('e'),
+    answered('Base directory for this skill: /skills/commit'),
+    called('f'),
+    answered(),
+    said('Done.'),
+    typed('and the docs'),
+    called('g'),
+  ] as never)
+
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, c: false, d: true, e: false, f: false, g: true })
 })
