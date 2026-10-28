@@ -158,14 +158,6 @@ const COUNTDOWN: Plugin = {
 const toolUse = (props: ReturnType<typeof call>, surface: (typeof SURFACES)[number] = 'terminal') =>
   ({ ...SITE, surface, component: 'ToolUse', requestId: props.tool_use_id, props }) as const
 
-// A failed call's row opens by itself and draws the answer there; closed, the answer is
-// its ToolResult's again.
-async function closeRow($: Engine, id: string, tool = 'Bash') {
-  const row = await $.ui.mount(toolUse(call(tool, { command: '' }, { tool_use_id: id, isErrored: true })))
-  await row.press({ key: 'disclose' })
-  await row.unmount()
-}
-
 test('the terminal skin paints rows in the terminal\u2019s ANSI colours and bands in Claude Code\u2019s theme', async ($, on) => {
   stubEngine(on)
   await runSkin($, 'terminal')
@@ -230,6 +222,73 @@ test('tools a skin cannot redraw faithfully keep their own row', async ($, on) =
   const ui = await $.ui.mount(toolUse(call('Task', { description: 'dig' })))
 
   expect(await ui.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+})
+
+type Tree = { props?: Record<string, unknown>; children?: readonly unknown[] }
+
+// Every blank line a drawing asks for above or below one of its boxes, as `marginTop: 1`.
+function blankLines(node: unknown): string[] {
+  const tree = node as Tree | undefined
+  const own = ['margin', 'marginY', 'marginTop', 'marginBottom']
+    .filter(key => typeof tree?.props?.[key] === 'number' && tree.props[key] !== 0)
+    .map(key => `${key}: ${String(tree?.props?.[key])}`)
+
+  return [...own, ...(tree?.children ?? []).flatMap(blankLines)]
+}
+
+// One blank line between a run of tool rows and what is not one, none inside the run: a
+// tool row owns no blank line, whatever it shows, and what is not one owns the line above.
+test('a tool row owns no blank line, closed, opened or under its card', async ($, on) => {
+  stubEngine(on)
+  const output = { stdout: 'ok', stderr: '', interrupted: false }
+
+  const row = await $.ui.mount(toolUse(call('Bash', { command: 'pnpm test' }, { tool_use_id: 'b1', output })))
+  expect(blankLines(await row.find({ type: 'Box' }))).toEqual([])
+  await row.press({ key: 'disclose' })
+  expect(await row.find({ type: 'Text', text: '$ pnpm test' })).toBeDefined()
+  expect(blankLines(await row.find({ type: 'Box' }))).toEqual([])
+  await row.unmount()
+
+  const card = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'ToolResult', requestId: 'b2', props: { tool_use_id: 'b2', tool: 'Bash', output, isErrored: false } })
+  expect(await card.find({ type: 'Text', text: 'ok' })).toBeDefined()
+  expect(blankLines(await card.find({ type: 'Box' }))).toEqual([])
+})
+
+test('a prompt, a reply and the turn footer each own the blank line above them, none below', async ($, on) => {
+  stubEngine(on)
+
+  const prompt = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'UserMessage', requestId: 'p1', props: { text: 'fix the build', origin: { kind: 'composer' }, isExpanded: false } })
+  expect(blankLines(await prompt.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
+
+  // Its blocks sit a line apart, and a card at either edge adds no line of its own.
+  const text = '```ts\nconst a = 1\n```\n\nThen:\n\n| a | b |\n|---|---|\n| 1 | 2 |'
+  const reply = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'a1', props: { text, isFirstOfReply: true } })
+  expect(await reply.find({ type: 'Text', text: 'Then:' })).toBeDefined()
+  expect(blankLines(await reply.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
+
+  const footer = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'TurnDuration', requestId: 'f1', props: { word: 'Baked', durationMs: 64000 } })
+  expect(blankLines(await footer.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
+})
+
+test('an agent keeps Claude Code’s row less the blank line above it; Skill and task calls get the skin’s row', async ($, on) => {
+  stubEngine(on)
+
+  const agent = await $.ui.mount(toolUse(call('Agent', { description: 'dig' }, { tool_use_id: 'g1' })))
+  expect(await agent.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+  expect(blankLines(await agent.find({ type: 'Box' }))).toEqual(['marginTop: -1'])
+  await agent.unmount()
+
+  const desktop = await $.ui.mount(toolUse(call('Agent', { description: 'dig' }, { tool_use_id: 'g2' }), 'desktop'))
+  expect(blankLines(await desktop.find({ type: 'Box' }))).toEqual([])
+  await desktop.unmount()
+
+  const update = await $.ui.mount(toolUse(call('TaskUpdate', { taskId: '3', status: 'completed' }, { tool_use_id: 'g3' })))
+  expect(await update.find({ type: 'Text', text: 'stock row' })).toBeUndefined()
+  expect(await update.find({ type: 'Text', text: /TaskUpdate {2}3 → completed/ })).toBeDefined()
+  await update.unmount()
+
+  const skill = await $.ui.mount(toolUse(call('Skill', { skill: 'devi:commit' }, { tool_use_id: 'g4' })))
+  expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
 test('a folded group is one node, an expanded one keeps its rows', async ($, on) => {
@@ -650,8 +709,8 @@ test('a table wider than its share spans the column instead of running off it', 
       props: { text: wide, isFirstOfReply: true },
     })
     type Node = { props?: { width?: unknown; position?: unknown; top?: unknown; borderStyle?: unknown }; children?: readonly Node[] }
-    const reply = (await ui.find({ type: 'Box' })) as Node
-    const frame = reply.children?.[0]
+    const boxes = (await ui.findAll({ type: 'Box' })) as Node[]
+    const frame = boxes.find(box => box.children?.[0]?.props?.borderStyle === 'round')
     // Copy sits on the bordered box's top row, laid over it from the plain Box around it:
     // inside the bordered box, Windows Terminal drew the border over it (#54).
     const bordered = frame?.children?.[0]
@@ -1206,8 +1265,8 @@ test('on the desktop the Copy button is laid over the card, in the corner the ca
     props: { text: '```ts\nconst a = 1\n```', isFirstOfReply: true },
   })
   type Node = { type?: string; props?: Record<string, unknown>; children?: readonly Node[] }
-  const reply = (await ui.find({ type: 'Box' })) as Node
-  const card = reply.children?.[0]
+  const boxes = (await ui.findAll({ type: 'Box' })) as Node[]
+  const card = boxes.find(box => box.children?.[1]?.props?.position === 'absolute')
   const overlay = card?.children?.[1]
 
   expect(card?.props?.alignSelf).toBe('flex-start')
@@ -1403,7 +1462,7 @@ test('/resume loads the saved prefs from the hook session id, before any row is 
   expect(await colorNow('r2')).not.toBe(before)
 })
 
-test('quiet output folds a read-only call to its row, a failure to its error line', async ($, on) => {
+test('quiet output folds a read-only call to its row, and a failure keeps its error under it', async ($, on) => {
   stubEngine(on)
   // The kit gives each call its own id; the engine's answer reads it back.
   const ids: string[] = []
@@ -1434,9 +1493,10 @@ test('quiet output folds a read-only call to its row, a failure to its error lin
   expect(await quiet.find({ type: 'Text', text: 'On branch main' })).toBeUndefined()
   await quiet.unmount()
 
-  await closeRow($, q1)
-  const failed = await $.ui.mount(result(q1, 'Bash', { stdout: '', stderr: 'fatal: not a git repository', interrupted: false }, true))
-  expect(await failed.find({ type: 'Text', text: '✖ fatal: not a git repository' })).toBeDefined()
+  const output = { stdout: '', stderr: 'fatal: not a git repository', interrupted: false }
+  const failed = await $.ui.mount(toolUse(call('Bash', { command: 'git status' }, { tool_use_id: q1, isErrored: true, output })))
+  expect(await failed.find({ type: 'Text', text: /Looked/ })).toBeDefined()
+  expect(await failed.find({ type: 'Text', text: 'fatal: not a git repository' })).toBeDefined()
   await failed.unmount()
 
   // A call that might write keeps its output.
@@ -2299,9 +2359,8 @@ test('a failed shell call shows its exit code, and stderr under its own label in
   const [id = '', other = ''] = await ranShells($, on, ['pnpm tsc', 'pnpm lint'])
   const palette = noir.palette
 
-  await closeRow($, id)
-  await closeRow($, other)
-  const record = await $.ui.mount(shellResult(id, { stdout: 'src/server.ts', stderr: 'error TS2322: Type string is not assignable to number', interrupted: false }, true))
+  const failure = (tool_use_id: string, command: string, output: unknown) => toolUse(call('Bash', { command }, { tool_use_id, isErrored: true, output }))
+  const record = await $.ui.mount(failure(id, 'pnpm tsc', { stdout: 'src/server.ts', stderr: 'error TS2322: Type string is not assignable to number', interrupted: false }))
   expect(await record.find({ type: 'Text', text: '✗ failed' })).toBeDefined()
   expect(await record.find({ type: 'Text', text: 'stderr' })).toBeDefined()
   const err = (await record.find({ type: 'Text', text: 'error TS2322: Type string is not assignable to number' })) as Found
@@ -2312,7 +2371,7 @@ test('a failed shell call shows its exit code, and stderr under its own label in
   await record.unmount()
 
   // The error text Claude Code hands back in place of the record names the exit code.
-  const text = await $.ui.mount(shellResult(other, 'Exit code 2\nerror: 3 problems', true))
+  const text = await $.ui.mount(failure(other, 'pnpm lint', 'Exit code 2\nerror: 3 problems'))
   expect(await text.find({ type: 'Text', text: '$ pnpm lint' })).toBeDefined()
   expect(await text.find({ type: 'Text', text: '✗ exit 2' })).toBeDefined()
   expect(await text.find({ type: 'Text', text: 'error: 3 problems' })).toBeDefined()
@@ -2391,8 +2450,7 @@ test('/skin calm stills the spinner, drops the rail, folds read-only output and 
 
   // A failure is drawn whole: every stderr line, not quiet's one line or the fold.
   const stderr = Array.from({ length: 30 }, (_, i) => `error ${i + 1}`).join('\n')
-  await closeRow($, look)
-  const failed = await $.ui.mount(shellResult(look, { stdout: '', stderr, interrupted: false }, true))
+  const failed = await $.ui.mount(toolUse(call('Bash', { command: 'git status' }, { tool_use_id: look, isErrored: true, output: { stdout: '', stderr, interrupted: false } })))
   expect(await failed.find({ type: 'Text', text: '✗ failed' })).toBeDefined()
   expect(await failed.find({ type: 'Text', text: 'error 15' })).toBeDefined()
   expect(await failed.find({ type: 'Text', text: /lines hidden/ })).toBeUndefined()

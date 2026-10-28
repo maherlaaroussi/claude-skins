@@ -82,8 +82,8 @@ test('an opened Read shows the path and range asked for and the text with line n
   stubEngine(on)
 
   const ui = await opened($, call('r1', 'Read', { file_path: '/work/src/a.ts', offset: 41, limit: 3 }, readOutput(3, 41)))
-  expect(await ui.find({ type: 'Text', text: /path {2}src\/a\.ts/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /lines {2}41–43/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', text: /path {2}src\/a\.ts/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', text: /lines {2}41–43/ })).toBeDefined()
   const code = (await ui.find({ type: 'Code' })) as CodeFound
   expect(code?.props.startLine).toBe(41)
   expect(code?.props.path).toBe('/work/src/a.ts')
@@ -106,8 +106,8 @@ test('an opened Grep shows its pattern, glob and the matching lines or files', a
   stubEngine(on)
 
   const content = await opened($, call('g1', 'Grep', { pattern: 'TODO', glob: '*.ts', output_mode: 'content' }, { mode: 'content', numFiles: 1, filenames: [], content: '/work/src/a.ts:3:// TODO tidy\n/work/src/a.ts:9:// TODO test', numLines: 2 }))
-  expect(await content.find({ type: 'Text', text: /pattern {2}TODO/ })).toBeDefined()
-  expect(await content.find({ type: 'Text', text: /glob {2}\*\.ts/ })).toBeDefined()
+  expect(await content.find({ type: 'Box', text: /pattern {2}TODO/ })).toBeDefined()
+  expect(await content.find({ type: 'Box', text: /glob {2}\*\.ts/ })).toBeDefined()
   expect(await content.find({ type: 'Text', text: 'src/a.ts:9:// TODO test' })).toBeDefined()
   expect(await content.find({ type: 'Text', text: '2 lines' })).toBeDefined()
   await content.unmount()
@@ -121,7 +121,7 @@ test('an opened PowerShell call shows its command and output as the shell card',
   stubEngine(on)
 
   const ui = await opened($, call('p1', 'PowerShell', { command: 'Get-ChildItem src' }, { stdout: 'a.ts\nb.ts', stderr: '', interrupted: false }))
-  expect(await ui.find({ type: 'Text', text: /command {2}Get-ChildItem src/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', text: /command {2}Get-ChildItem src/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '$ Get-ChildItem src' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'b.ts' })).toBeDefined()
   await ui.unmount()
@@ -189,29 +189,65 @@ test('an opened image Read is Claude Code’s own drawing, and its result stays 
 
   const ui = await opened($, call('i1', 'Read', { file_path: '/work/shot.png' }, output))
   expect(await ui.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /path {2}shot\.png/ })).toBeDefined()
+  expect(await ui.find({ type: 'Box', text: /path {2}shot\.png/ })).toBeDefined()
 
   const result = await $.ui.mount(toolResult('i1', 'Read', output))
   expect(await result.find({ type: 'Text', text: 'stock row' })).toBeDefined()
 })
 
-test('a failed call opens by itself and draws its error there, not twice', async ($, on) => {
+// In an expanded group no ToolResult draws a call's answer, so a failed row keeps its own
+// under it, closed: the error without the input. Opened, the input joins it, drawn once.
+test('a failed call stays closed with its error under it, and opened adds its input', async ($, on) => {
   stubEngine(on)
   const error = '<tool_use_error>File does not exist.</tool_use_error>'
 
   const ui = await $.ui.mount(toolUse(call('f1', 'Read', { file_path: '/work/gone.ts' }, error, { isErrored: true })))
-  expect(((await ui.find({ key: 'disclose' })) as { props: { label: string } } | undefined)?.props.label).toBe('▾')
+  expect(((await ui.find({ key: 'disclose' })) as { props: { label: string } } | undefined)?.props.label).toBe('▸')
   expect(await ui.find({ type: 'Text', text: 'File does not exist.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'path  ' })).toBeUndefined()
 
   const result = await $.ui.mount(toolResult('f1', 'Read', error, true))
   expect(await result.find({ type: 'Text', text: 'stock row' })).toBeUndefined()
   await result.unmount()
 
-  // Closed, the result is Claude Code's again.
   await ui.press({ key: 'disclose' })
-  expect(await ui.find({ type: 'Text', text: 'File does not exist.' })).toBeUndefined()
-  const again = await $.ui.mount(toolResult('f1', 'Read', error, true))
-  expect(await again.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+  expect(((await ui.find({ key: 'disclose' })) as { props: { label: string } } | undefined)?.props.label).toBe('▾')
+  expect(await ui.find({ type: 'Text', text: 'path  ' })).toBeDefined()
+  expect(await ui.findAll({ type: 'Text', text: 'File does not exist.' })).toHaveLength(1)
+})
+
+test('a failed shell call stays closed with its card under it, and opened draws the card once', async ($, on) => {
+  stubEngine(on)
+  const error = 'Exit code 128\nfatal: not a git repository'
+
+  const ui = await $.ui.mount(toolUse(call('f2', 'Bash', { command: 'git status' }, error, { isErrored: true })))
+  expect(await ui.findAll({ type: 'Text', text: '$ git status' })).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: '✗ exit 128' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'command  ' })).toBeUndefined()
+  const under = await $.ui.mount(toolResult('f2', 'Bash', error, true))
+  expect(await under.find({ type: 'Text', text: '$ git status' })).toBeUndefined()
+  await under.unmount()
+
+  await ui.press({ key: 'disclose' })
+  expect(await ui.find({ type: 'Text', text: 'command  ' })).toBeDefined()
+  expect(await ui.findAll({ type: 'Text', text: '$ git status' })).toHaveLength(1)
+})
+
+// A label in a box of its own and the value in one that grows: a value too long for one
+// line, or of several, wraps under itself and not back under the label.
+test('an opened row’s field hangs its value beside its label', async ($, on) => {
+  stubEngine(on)
+  type Node = { props: Record<string, unknown>; children?: readonly Node[] }
+
+  const ui = await opened($, call('h1', 'Bash', { command: 'git commit -m "one"\n  -m "two"' }, { stdout: '', stderr: '', interrupted: false }))
+  // The innermost box with the label and the value is the field's own row.
+  const field = ((await ui.findAll({ type: 'Box', text: /^command {2}git commit/ })) as Node[]).at(-1)
+  const [label, value] = field?.children ?? []
+  expect(field?.props.flexDirection).toBe('row')
+  expect(label?.props.flexShrink).toBe(0)
+  expect(await ui.find({ type: 'Text', text: 'command  ' })).toBeDefined()
+  expect(value?.props.flexGrow).toBe(1)
+  expect(await ui.find({ type: 'Text', text: 'git commit -m "one"\n  -m "two"' })).toBeDefined()
 })
 
 test('each call keeps its own open state', async ($, on) => {
@@ -228,9 +264,9 @@ test('each call keeps its own open state', async ($, on) => {
 })
 
 test('the detail logic reads each answer the way its row draws it', () => {
-  expect(isOpen('auto', true)).toBe(true)
-  expect(isOpen('auto', false)).toBe(false)
-  expect(isOpen('closed', true)).toBe(false)
+  expect(isOpen('auto')).toBe(false)
+  expect(isOpen('closed')).toBe(false)
+  expect(isOpen('open')).toBe(true)
   expect(inputFields('Bash', { command: 'ls', description: 'list', timeout: 5000 }, '/work').map(field => field.label)).toEqual(['command', 'description', 'timeout'])
   expect(bodyOf('Bash', { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b1' }, false, false, '/work').kind).toBe('stock')
   expect(bodyOf('Read', readOutput(1), false, true, '/work').kind).toBe('none')
