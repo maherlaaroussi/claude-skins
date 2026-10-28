@@ -4,6 +4,7 @@ import type { Engine, Plugin } from 'claude-code/testing'
 
 import { DESIGN_TOOL } from '../hooks/designer'
 import { widthOf } from '../hooks/markdown'
+import { CHART_HINT } from '../hooks/mermaid'
 import { mermaidArt } from '../hooks/mermaid-art'
 import { literal } from '../hooks/rows'
 import { cardWidth } from '../hooks/svg-kit'
@@ -997,21 +998,35 @@ test('with charts off, or Mermaid the parser cannot read, the fence keeps its co
   expect(await off.find({ type: 'Svg' })).toBeUndefined()
 })
 
-test('while charts are on, the system prompt tells Claude it can answer with one', async ($, on) => {
+test("while charts are on, a session's first prompt tells Claude it can answer with one", async ($, on) => {
+  let session = 's1'
+  let surfaces: readonly string[] = ['terminal']
   stubEngine(on)
-  on('prompt.compose', () => ({ sections: [{ id: 'base', text: 'You are Claude.', scope: 'shared' as const }] }))
+  on('session.id', () => ({ value: session }))
+  on('session.surfaces', () => ({ value: surfaces as never }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
 
-  const compose = (traits: readonly string[] = []) =>
-    $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: ['terminal'], tools: [], outputStyle: null, traits: traits as never })
+  const submit = async (more: object = {}) =>
+    (await $.prompt.submit({ text: 'show me the plan', wait: false, origin: { kind: 'composer' }, ...more } as never)).context ?? []
 
-  expect((await compose()).sections.map(section => section.id)).toEqual(['base', 'skins:charts'])
-  expect((await compose(['print'])).sections.map(section => section.id)).toEqual(['base'])
+  expect(await submit()).toEqual([CHART_HINT])
+  expect(await submit(), 'once per session').toEqual([])
+
+  session = 's2'
+  expect(await submit({ text: '/skin', command: { name: 'skin', args: '' } }), 'not beside a slash command').toEqual([])
+  expect(await submit({ isMeta: true }), 'not beside a hidden prompt').toEqual([])
+  expect(await submit(), 'again in the next session').toEqual([CHART_HINT])
+
+  session = 's3'
+  surfaces = []
+  expect(await submit(), 'not for a headless run').toEqual([])
+  surfaces = ['terminal']
 
   await runSkin($, 'hints off')
-  expect((await compose()).sections.map(section => section.id)).toEqual(['base'])
+  expect(await submit()).toEqual([])
   await runSkin($, 'hints on')
   await runSkin($, 'charts off')
-  expect((await compose()).sections.map(section => section.id)).toEqual(['base'])
+  expect(await submit()).toEqual([])
 })
 
 const BAND = (surface: (typeof SURFACES)[number], isWorking: boolean) =>
@@ -1305,9 +1320,7 @@ test('/skin pin keeps a look to this folder, /skin unpin returns to the default'
   expect((store.prefs as { skin: string }).skin).toBe('dracula')
 })
 
-// On a Team or Enterprise plan the built-in guard holds classic.SessionStart back from
-// user-tier mods, so /clear reaches skins only as the new session's first appended row.
-test('the first row of a new session loads the saved prefs again, without classic.SessionStart', async ($, on) => {
+test('the first row of a new session loads the saved prefs again', async ($, on) => {
   const store: Record<string, unknown> = {}
   let session = 's1'
   stubEngine(on, { store: true })
@@ -1321,7 +1334,7 @@ test('the first row of a new session loads the saved prefs again, without classi
   on('command.register', () => ({ value: { command: 'skin' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
   on('config.list', () => ({ value: [] }))
-  const note = { message: { type: 'user', content: [{ type: 'text', text: 'hi' }] } } as never
+  const note = { door: 'prompt', message: { type: 'user', content: [{ type: 'text', text: 'hi' }] } } as never
 
   // An older kit (the pinned CI build) cannot append a row at all: nothing to check there.
   if (!(await $.session.append(note).then(() => true, () => false))) {
@@ -1346,14 +1359,19 @@ test('the first row of a new session loads the saved prefs again, without classi
 // A scheduled task's session, resumed in the desktop app, can start before Claude Code binds it (#64).
 test('a resume before the session is bound shows no error, and the next row loads it', async ($, on) => {
   const logs: string[] = []
-  let isBound = false
+  let isBound = true
+  let session = 's1'
   let themeReads = 0
-  stubEngine(on, { log: true })
+  const clock = stubEngine(on, { log: true })
   on('ui.log', ($, e) => {
     logs.push(e.text)
     return { value: undefined }
   })
-  on('session.id', () => ({ value: 's1' }))
+  on('session.id', () => ({ value: session }))
+  on('session.start', () => ({ cwd: '/work' }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('command.register', () => ({ value: { command: 'skin' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
   on('config.list', () => {
     if (!isBound) {
       throw new Error('$.config.list is not available in this mode: no session is bound in this process')
@@ -1361,37 +1379,41 @@ test('a resume before the session is bound shows no error, and the next row load
     themeReads += 1
     return { value: [] }
   })
-  on('classic.SessionStart', () => ({}) as never)
-  const note = { message: { type: 'user', content: [{ type: 'text', text: 'hi' }] } } as never
+  const note = { door: 'prompt', message: { type: 'user', content: [{ type: 'text', text: 'hi' }] } } as never
 
-  await $.classic.SessionStart({ source: 'resume' } as never)
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+  isBound = false
+  await $.session.end({ reason: 'resume', sessionId: 's1' } as never)
+  session = 's2'
+  await clock.advance(100)
   expect(logs.filter(text => text.startsWith('not loaded yet:')), 'the prefs load without the theme').toHaveLength(0)
   expect(logs.filter(text => text.startsWith('theme not read yet:'))).toHaveLength(1)
 
   // An older kit (the pinned CI build) cannot append a row at all: nothing more to check there.
   isBound = true
+  themeReads = 0
   if (!(await $.session.append(note).then(() => true, () => false))) {
     return
   }
   expect(themeReads, 'the row after the bind reads the theme').toBeGreaterThan(0)
 })
 
-// A terminal /resume appends no row until the next prompt, and $.session.id() can still answer
-// the old session there: the hook's own session_id loads the prefs for the history (#77).
-test('/resume loads the saved prefs from the hook session id, before any row is appended', async ($, on) => {
+// A terminal /resume appends no row until the next prompt (#77).
+test('/resume loads the saved prefs within a frame, before any row is appended', async ($, on) => {
   const store: Record<string, unknown> = {}
-  stubEngine(on, { store: true })
+  let session = 's1'
+  const clock = stubEngine(on, { store: true })
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
     store[e.key] = e.value
     return { value: undefined }
   })
-  on('session.id', () => ({ value: 's1' }))
+  on('session.id', () => ({ value: session }))
   on('session.start', () => ({ cwd: '/work' }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('command.register', () => ({ value: { command: 'skin' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__skins__design' } }))
   on('config.list', () => ({ value: [] }))
-  on('classic.SessionStart', () => ({}) as never)
 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   const colorNow = async (id: string) =>
@@ -1399,8 +1421,13 @@ test('/resume loads the saved prefs from the hook session id, before any row is 
   const before = await colorNow('r1')
 
   store.prefs = { skin: 'dracula' }
-  await $.classic.SessionStart({ source: 'resume', session_id: 's2' } as never)
-  expect(await colorNow('r2')).not.toBe(before)
+  await $.session.end({ reason: 'resume', sessionId: 's1' } as never)
+  await clock.advance(100)
+  expect(await colorNow('r2'), 'still the ending session').toBe(before)
+
+  session = 's2'
+  await clock.advance(100)
+  expect(await colorNow('r3')).not.toBe(before)
 })
 
 test('quiet output folds a read-only call to its row, a failure to its error line', async ($, on) => {

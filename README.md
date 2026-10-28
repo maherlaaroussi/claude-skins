@@ -165,7 +165,7 @@ Every card has a Copy button (tables also `as text`, the table as drawn; a reply
 drawing changes: the stored conversation and what the model reads are untouched. Agents, plan mode
 and the permission prompt keep Claude Code's own drawing.
 
-**Chart hints.** While charts are on, Claude gets a short model-only note (about 130 tokens, estimated from its 458 characters) saying ` ```mermaid ` fences draw here, so it reaches for a chart when one reads better. Never for headless `claude -p` runs. `/skin hints off` drops it and keeps charts drawing.
+**Chart hints.** While charts are on, Claude gets a short model-only note (about 130 tokens, estimated from its 458 characters) beside the first prompt of each session, saying ` ```mermaid ` fences draw here, so it reaches for a chart when one reads better. Never for headless `claude -p` runs. `/skin hints off` stops it and keeps charts drawing.
 
 **Light and dark.** Every skin has both and follows Claude Code's theme. On `auto` it follows your
 terminal (`COLORFGBG`) or the system. Force one with `SKINS_THEME=light` or `SKINS_THEME=dark`.
