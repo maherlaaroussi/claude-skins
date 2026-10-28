@@ -50,15 +50,20 @@ export function disclosedRow(look: Look, row: RenderElement, isOpen: boolean, to
   )
 }
 
+// The value in a box of its own, so a long or multi-line one wraps under itself, not the label.
 function fieldRows(look: Look, fields: readonly Field[]) {
-  const { Text } = look.ui
+  const { Box, Text } = look.ui
   const { palette } = look.skin
 
   return fields.map(field => (
-    <Text>
-      <Text color={palette.muted}>{`${field.label}  `}</Text>
-      <Text color={palette.fg}>{field.value.length > MAX_BLOCK ? `${field.value.slice(0, MAX_BLOCK)}…` : field.value}</Text>
-    </Text>
+    <Box flexDirection="row">
+      <Box flexShrink={0}>
+        <Text color={palette.muted}>{`${field.label}  `}</Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text color={palette.fg}>{field.value.length > MAX_BLOCK ? `${field.value.slice(0, MAX_BLOCK)}…` : field.value}</Text>
+      </Box>
+    </Box>
   ))
 }
 
