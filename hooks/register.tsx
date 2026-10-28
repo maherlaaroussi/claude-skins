@@ -434,11 +434,13 @@ async function load($: EngineInterface): Promise<void> {
 }
 
 // The session the prefs were last loaded for. /clear, /resume and /branch reset $.state to its
-// defaults and skip session.start, and on a Team or Enterprise plan the built-in guard
-// (cc-plugin-sec-default) keeps classic.SessionStart from user-tier mods: the new session's first
-// appended rows catch the change instead. No await between the check and the write, so a burst of
-// appends loads once.
+// defaults and skip session.start. No await between the check and the write, so a burst of
+// appends and frames loads once.
 let loadedFor: string | undefined
+
+// Set by /clear, /resume and /branch, then checked each frame: a terminal /resume appends no row
+// until the next prompt (#77), and ui.render may not write $.state.
+let sessionPending = false
 
 // Undefined where nothing answers for the session's id (a test's engine): then there is nothing to compare.
 const sessionId = ($: EngineInterface): Promise<string | undefined> => $.session.id().catch(() => undefined)
@@ -460,15 +462,15 @@ async function retryTheme($: EngineInterface): Promise<void> {
   })
 }
 
-// `known` is the id a hook was handed: on /resume, $.session.id() can still answer the old one.
-async function reloadIfNewSession($: EngineInterface, known?: string): Promise<void> {
-  const id = known ?? (await sessionId($))
+async function reloadIfNewSession($: EngineInterface): Promise<void> {
+  const id = await sessionId($)
 
   if (id === undefined || id === loadedFor) {
     return
   }
 
   loadedFor = id
+  sessionPending = false
 
   // A resumed scheduled-task session can start before Claude Code has bound it (#64). Not
   // loaded yet, then: the next append tries again.
@@ -713,6 +715,10 @@ export const register: Register = on => {
       if (settling.size > 0) {
         void settleEntrances($)
       }
+
+      if (sessionPending) {
+        void reloadIfNewSession($)
+      }
     })
     countdownTicker?.cancel()
     countdownTicker = $.clock.every(COUNTDOWN_MS, () => {
@@ -724,9 +730,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Where the guard does not hold it back, this comes first; session.append then finds the session loaded.
-  on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
-    await reloadIfNewSession($, typeof e.session_id === 'string' && e.session_id !== '' ? e.session_id : undefined)
+  // Not classic.SessionStart: on a Team or Enterprise plan the built-in guard (cc-plugin-sec-default)
+  // holds classic.* back from user-tier mods, and Claude Code says so every session (#94).
+  // A /branch ends its session with the reason `resume`.
+  on('session.end', async ($, e, next) => {
+    sessionPending = e.reason === 'clear' || e.reason === 'resume'
 
     return next(e)
   })
@@ -745,6 +753,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     stats = NO_STATS
     isWorking = true
+    sessionPending = false
     // A worktree can move the session between turns.
     sessionCwd = await $.session.cwd()
     hasTouched = false
@@ -767,8 +776,9 @@ export const register: Register = on => {
   })
 
   // Loads the prefs again for a new session (see loadedFor), and notes which prompts carried images,
-  // so their row keeps Claude Code's drawing of them.
-  on('session.append', async ($, e, next) => {
+  // so their row keeps Claude Code's drawing of them. Not the doors the guard holds back (attachments,
+  // hook context, compaction, a Skill's message): a hook matched there is skipped and named (#94).
+  on('session.append', { door: ['prompt', 'command', 'response', 'tool-result', 'delivery', 'note', 'notice', 'queue'] }, async ($, e, next) => {
     await reloadIfNewSession($)
     await retryTheme($)
     const stored = await next(e)
@@ -1173,18 +1183,27 @@ export const register: Register = on => {
     return promptRow(look, e.props.text, hasImages ? await next({ ...e, props: { ...e.props, text: '' } }) : undefined)
   })
 
-  // While charts are drawn, the model learns it can answer a "show me" with a Mermaid
-  // fence. Nothing for a headless run, which draws nothing.
-  on('prompt.compose', async ($, e, next) => {
-    const result = await next(e)
-    const active = await activeSkin($)
-    const isHeadless = e.surfaces.length === 0 || e.traits.includes('bare') || e.traits.includes('print')
+  // While charts are drawn, the model learns it can answer a "show me" with a Mermaid fence, beside
+  // a session's first prompt. Not a system prompt section: the guard holds prompt.compose and
+  // prompt.section back from user-tier mods (#94). Nothing for a headless run, which draws nothing.
+  let hintedFor: string | undefined
 
-    if (active === null || !active.prefs.charts || !active.prefs.hints || isHeadless) {
-      return result
+  on('prompt.submit', async ($, e, next) => {
+    if (e.command !== undefined || e.isMeta) {
+      return next(e)
     }
 
-    return { sections: [...result.sections, { id: 'skins:charts', text: CHART_HINT, scope: 'session' as const }] }
+    const id = await sessionId($)
+    const active = await activeSkin($)
+    const isWanted = id !== undefined && id !== hintedFor && active !== null && active.prefs.charts && active.prefs.hints
+
+    if (!isWanted || (await $.session.surfaces()).length === 0) {
+      return next(e)
+    }
+
+    hintedFor = id
+
+    return next({ ...e, context: [...(e.context ?? []), CHART_HINT] })
   })
 
   // A reply keeps Claude Code's own drawing unless it holds a card or markdown the pack draws.
