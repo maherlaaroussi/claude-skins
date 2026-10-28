@@ -27,7 +27,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
-import { kindOf, summarize, toolLabel } from './tools'
+import { kindOf, runStarts, summarize, toolLabel } from './tools'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { isDue, isNewer, LATEST_URL, STAR_NOTICE, starStep, updateNotice, versionOf } from './updates'
@@ -299,6 +299,36 @@ const drawingOf = (e: { surface: RenderSurface; requestId: string }): string => 
 
 // What Claude Code's `isExpanded` read when a group was first drawn under `expand`.
 const groupStarts = new Map<string, boolean>()
+
+// Whether each tool call opens a run of tool rows, by tool_use_id, read from the transcript
+// once for every call it holds; the rows a resume draws at once share the one read. A host
+// that cannot read the transcript leaves every row in the run before it, as before.
+const runStartsById = new Map<string, boolean>()
+let readingRuns: Promise<void> | undefined
+
+async function opensRun($: EngineInterface, id: string): Promise<boolean> {
+  if (!runStartsById.has(id)) {
+    readingRuns ??= $.session
+      .messages()
+      .then(messages => {
+        for (const [key, value] of runStarts(messages)) {
+          runStartsById.set(key, value)
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        readingRuns = undefined
+      })
+    await readingRuns
+  }
+
+  return runStartsById.get(id) ?? false
+}
+
+// The blank line a tool row owns above it: one when it opens a run of tool rows, else none.
+async function lineAbove($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
+  return surface === 'terminal' && id !== undefined && (await opensRun($, id)) ? 1 : 0
+}
 
 const drawnBy = (drawing: string, drawnAt: number) => (key: string, entranceMs: number) => {
   const card = `${drawing}:${key}`
@@ -951,8 +981,8 @@ export const register: Register = on => {
       const { Box } = $.ui.resolve(e)
 
       // Claude Code's row keeps its live progress, and brings the blank line it puts above
-      // every row of its own; a tool row owns none, so this takes it back.
-      return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
+      // every row of its own: kept when the row opens a run, taken back when it does not.
+      return (await lineAbove($, e.surface, e.props.tool_use_id)) === 1 ? next(e) : <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
     }
 
     if (kind === null || active === null) {
@@ -991,9 +1021,11 @@ export const register: Register = on => {
     const label = active.prefs.quiet && isQuiet(e.props.tool, e.props.input) ? quietLabel(e.props.tool) : toolLabel(e.props.tool)
     const row = toolRow(look, e.props, kind, target, meta, label, touch)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
+    const above = await lineAbove($, e.surface, e.props.tool_use_id)
+    const placed = (drawn: RenderElement) => (above === 0 ? drawn : <look.ui.Box flexDirection="column" marginTop={above}>{drawn}</look.ui.Box>)
 
     if (!isAnswered) {
-      return withSettle($, e, disclosedRow(look, row, false, toggle))
+      return withSettle($, e, placed(disclosedRow(look, row, false, toggle)))
     }
 
     const all = memberOf(allAtom, e)
@@ -1010,7 +1042,7 @@ export const register: Register = on => {
       stock: () => next(e),
     })
 
-    return withSettle($, e, disclosedRow(look, row, open, toggle, opened))
+    return withSettle($, e, placed(disclosedRow(look, row, open, toggle, opened)))
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
@@ -1040,7 +1072,10 @@ export const register: Register = on => {
       }
     }
 
-    return groupRow(lookOf($.ui.resolve(e), active, e.surface), e.props.calls)
+    const ui = $.ui.resolve(e)
+    const row = groupRow(lookOf(ui, active, e.surface), e.props.calls)
+
+    return (await lineAbove($, e.surface, e.props.calls[0]?.tool_use_id)) === 0 ? row : <ui.Box flexDirection="column" marginTop={1}>{row}</ui.Box>
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {

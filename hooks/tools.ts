@@ -1,3 +1,5 @@
+import type { SessionMessage } from 'claude-code'
+
 import { oneLine, shortenPath } from './format'
 import type { Kind } from './skin'
 
@@ -28,6 +30,30 @@ export function kindOf(tool: string): Kind | null {
   }
 
   return BUILTIN[tool] ?? null
+}
+
+// Which tool calls open a run of tool rows: the call the transcript drew right before it,
+// if any, was not a tool call but a prompt or a reply. Thinking and results draw nothing
+// between two calls, nor does a user text that rides in after a result (a skill's).
+export function runStarts(messages: readonly SessionMessage[]): Map<string, boolean> {
+  const starts = new Map<string, boolean>()
+  let isAfterCall = false
+
+  for (const [i, message] of messages.entries()) {
+    const hasResults = (message.toolResults?.length ?? 0) > 0
+    const isInjected = (messages[i - 1]?.toolResults?.length ?? 0) > 0
+
+    if (message.text !== '' && !hasResults && !(message.role === 'user' && isInjected)) {
+      isAfterCall = false
+    }
+
+    for (const use of message.toolUses) {
+      starts.set(use.tool_use_id, !isAfterCall)
+      isAfterCall = true
+    }
+  }
+
+  return starts
 }
 
 // `mcp__github__search_code` reads as `github:search_code`.
