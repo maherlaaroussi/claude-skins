@@ -1,7 +1,7 @@
 import { oneLine, shortenPath } from './format'
-import type { ToolKind } from './skin'
+import type { Kind } from './skin'
 
-const BUILTIN: Readonly<Record<string, ToolKind>> = {
+const BUILTIN: Readonly<Record<string, Kind>> = {
   Bash: 'run',
   PowerShell: 'run',
   Read: 'read',
@@ -13,13 +13,16 @@ const BUILTIN: Readonly<Record<string, ToolKind>> = {
   Grep: 'search',
   WebFetch: 'web',
   WebSearch: 'web',
+  Skill: 'other',
+  TaskCreate: 'other',
+  TaskUpdate: 'other',
 }
 
 const MAX_TARGET = 120
 
 // Null leaves the row to Claude Code: agents, plan mode and todos draw live progress
 // and dialogs that a skin would have to rebuild.
-export function kindOf(tool: string): ToolKind | null {
+export function kindOf(tool: string): Kind | null {
   if (tool.startsWith('mcp__')) {
     return 'mcp'
   }
@@ -77,6 +80,8 @@ export function summarize(tool: string, input: unknown, cwd: string): string {
         return textOf(fields.url).replace(/^https?:\/\//, '')
       case 'WebSearch':
         return textOf(fields.query)
+      case 'TaskUpdate':
+        return [textOf(fields.taskId), textOf(fields.status)].filter(part => part !== '').join(' → ')
       default:
         return firstString(fields)
     }

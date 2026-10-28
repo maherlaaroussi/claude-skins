@@ -148,15 +148,16 @@ async function bodyRows(look: Look, opened: Opened): Promise<RenderElement | str
   }
 }
 
-// What an opened row holds: the input, a line's breath, the answer.
+// What an opened row holds: the input, then the answer. A tool row owns no blank line,
+// opened or not, so the next row sits right under it.
 export async function openedRows(look: Look, opened: Opened) {
   const { Box } = look.ui
   const body = await bodyRows(look, opened)
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={2}>
       {fieldRows(look, opened.fields)}
-      {body === '' ? '' : <Box marginTop={opened.fields.length === 0 ? 0 : 1} flexDirection="column">{body}</Box>}
+      {body}
     </Box>
   )
 }

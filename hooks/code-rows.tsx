@@ -35,7 +35,7 @@ export function codeRows(look: Look, lang: string, code: string, control?: Retur
   const shown = lines.slice(0, shownCount(look, foldKey, lines.length, FOLD_CODE))
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       {onBorder(
         look,
         <Box flexDirection="column" borderStyle="round" borderColor={palette.muted} paddingX={1}>

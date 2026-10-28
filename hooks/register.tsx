@@ -90,6 +90,8 @@ const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 const WRITES = new Set([...EDITS, 'NotebookEdit'])
+// The subagent tool, `Task` before Claude Code renamed it.
+const AGENTS = new Set(['Agent', 'Task'])
 
 // Only a person's own typing becomes a prompt row: a task notification or a peer's
 // message is not theirs to dress as theirs.
@@ -945,6 +947,14 @@ export const register: Register = on => {
     const kind = kindOf(e.props.tool)
     const active = await activeSkin($)
 
+    if (active !== null && e.surface === 'terminal' && AGENTS.has(e.props.tool)) {
+      const { Box } = $.ui.resolve(e)
+
+      // Claude Code's row keeps its live progress, and brings the blank line it puts above
+      // every row of its own; a tool row owns none, so this takes it back.
+      return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
+    }
+
     if (kind === null || active === null) {
       return next(e)
     }
@@ -1175,7 +1185,10 @@ export const register: Register = on => {
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e, prefs) }
 
     // A reply of several blocks can be copied whole, as Claude wrote it.
-    return withSettle($, e, replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined))
+    const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
+
+    // On the terminal a reply owns the blank line above it, as Claude Code's own does.
+    return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
   })
 
   // A slash command's output (`/cost`, `/context`, a plugin's) drawn the way a reply is: its
@@ -1248,7 +1261,11 @@ export const register: Register = on => {
     const turns = await read($, turnsAtom)
     const word = active.prefs.words === 'claude' ? e.props.word : (pick(active.skin.done, e.props.word) ?? e.props.word)
 
-    return footerRow(lookOf($.ui.resolve(e), active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
+    const ui = $.ui.resolve(e)
+    const footer = footerRow(lookOf(ui, active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
+
+    // On the terminal the footer owns the blank line above it, as a reply does.
+    return e.surface === 'terminal' ? <ui.Box marginTop={1}>{footer}</ui.Box> : footer
   })
 
   // The band above the prompt: context and plan limits. Another mod's drawing there,

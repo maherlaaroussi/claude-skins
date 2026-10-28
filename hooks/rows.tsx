@@ -313,7 +313,7 @@ export function promptRow(look: Look, text: string, images?: ReturnType<Ui['Text
   const plain = look.prefs.prompt === 'plain'
 
   return (
-    <Box flexDirection="column" alignItems={look.prefs.prompt === 'right' ? 'flex-end' : 'flex-start'} marginY={1}>
+    <Box flexDirection="column" alignItems={look.prefs.prompt === 'right' ? 'flex-end' : 'flex-start'} marginTop={1}>
       <Box {...(plain ? {} : { borderStyle: 'round' as const, borderColor: look.skin.palette.muted, paddingX: 1 })} flexShrink={1}>
         {plain ? <Text color={look.skin.palette.user}>{`${look.icons.prompt} `}</Text> : ''}
         {markdown === null || markdown.length > MAX_MARKDOWN ? (
@@ -373,13 +373,13 @@ export function tableRows(look: Look, table: Table, maxWidth: number, control?: 
       {row(table.header, true, palette.surface)}
       {rows.map((cells, i) => row(cells, false, i % 2 === 1 ? palette.zebra : undefined))}
     </Box>,
-    { control, box: { marginY: fold === '' ? 1 : 0, ...(isFluid ? { width: '100%' } : { alignSelf: 'flex-start' }) } },
+    { control, box: isFluid ? { width: '100%' } : { alignSelf: 'flex-start' } },
   )
 
   return fold === '' ? (
     frame
   ) : (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       {frame}
       {fold}
     </Box>
@@ -451,7 +451,7 @@ function mathRows(look: Look, tex: string, maxWidth: number, key: string) {
   const { palette } = look.skin
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       <Text color={palette.muted} bold>
         MATH
       </Text>
@@ -751,25 +751,29 @@ function packRun(run: readonly Placed[], maxWidth: number, Svg?: SvgElement): Pl
   return [...rows, ...(row.length === 0 ? [] : [row])].map(placed => (placed.length === 1 ? placed.map(one => ({ ...one, width: maxWidth })) : placed))
 }
 
-// `whole`, the reply as Claude wrote it, adds a `copy reply` control under it.
+// `whole`, the reply as Claude wrote it, adds a `copy reply` control under it. Blocks drawn
+// as text sit a line apart, the reply's to give: they own no margin, so none adds up at
+// its edges. Cards drawn as images keep their own.
 export function replyRows(look: Look, segments: readonly Segment[], maxWidth: number, Svg?: SvgElement, whole?: string) {
   const { Box } = look.ui
 
   return (
     <Box flexDirection="column">
-      {layoutRows(look, segments, maxWidth, Svg).map(row =>
-        row.length === 1 ? (
-          segmentRow(look, row[0]!.segment, row[0]!.i, maxWidth, Svg)
-        ) : (
-          <Box flexDirection="row" columnGap={BESIDE_GAP} alignItems="flex-start">
-            {row.map(placed => (
-              <Box flexDirection="column" flexShrink={0} {...(Svg === undefined ? { width: placed.width } : { width: 0, flexGrow: 1 })}>
-                {segmentRow(look, placed.segment, placed.i, placed.width, Svg)}
-              </Box>
-            ))}
-          </Box>
-        ),
-      )}
+      <Box flexDirection="column" rowGap={Svg === undefined ? 1 : 0}>
+        {layoutRows(look, segments, maxWidth, Svg).map(row =>
+          row.length === 1 ? (
+            segmentRow(look, row[0]!.segment, row[0]!.i, maxWidth, Svg)
+          ) : (
+            <Box flexDirection="row" columnGap={BESIDE_GAP} alignItems="flex-start">
+              {row.map(placed => (
+                <Box flexDirection="column" flexShrink={0} {...(Svg === undefined ? { width: placed.width } : { width: 0, flexGrow: 1 })}>
+                  {segmentRow(look, placed.segment, placed.i, placed.width, Svg)}
+                </Box>
+              ))}
+            </Box>
+          ),
+        )}
+      </Box>
       {whole === undefined ? '' : copyRow(look, 'copy-reply', whole, 'copy reply')}
     </Box>
   )

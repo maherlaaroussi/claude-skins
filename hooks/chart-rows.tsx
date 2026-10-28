@@ -31,7 +31,7 @@ export function chartRows(look: Look, chart: Flow | XyChart | Pie, maxWidth: num
   const title = chart.kind === 'flow' ? '' : chart.title
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       <Text color={palette.muted}>
         <Text bold>{kind.toUpperCase()}</Text>
         {title === '' ? '' : <Text color={palette.fg} bold>{`  ${title}`}</Text>}
@@ -54,7 +54,7 @@ export function artRows(look: Look, art: Art, count: string) {
       : tone === 'muted' ? palette.muted : palette.fg
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       <Text color={palette.muted}>
         <Text bold>{art.kind.toUpperCase()}</Text>
         {title === '' ? '' : <Text color={palette.fg} bold>{`  ${title}`}</Text>}

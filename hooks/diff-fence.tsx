@@ -117,7 +117,7 @@ export function diffRows(
   const colors = roleColors(palette)
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       {onBorder(
         look,
         <Box flexDirection="column" borderStyle="round" borderColor={palette.muted} paddingX={1}>

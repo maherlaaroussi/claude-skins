@@ -2,11 +2,9 @@ import type { SkinSlot } from '../types'
 
 // Shapes shared by the skins and the row builders.
 
-// What a tool call is, by colour. `other` only shows in group rows.
+// What a tool call is, by colour. `other` is a call with nothing to show but its name and
+// target, such as Skill, and a group's call of no kind above.
 export type Kind = 'read' | 'write' | 'run' | 'search' | 'web' | 'mcp' | 'other'
-
-// The kinds a skin draws a tool row for; the rest keep Claude Code's own row.
-export type ToolKind = Exclude<Kind, 'other'>
 
 export type Slot = SkinSlot
 
