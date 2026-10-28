@@ -87,8 +87,8 @@ export type TurnStats = { tools: number; added: number; removed: number }
 // What this turn did to a file: made it, or changed one that was there.
 export type Touch = 'created' | 'edited'
 
-// How a tool row stands: opened or closed by the person, or `auto`, open only when the
-// call failed.
+// How a tool row stands: opened or closed by the person, or `auto`, untouched, which is
+// closed. A failed call's row shows its answer under it either way.
 export type Disclosure = 'auto' | 'open' | 'closed'
 
 // `$.skins.markdown`'s argument: where the tree draws, the markdown, the width in columns.

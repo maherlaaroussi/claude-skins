@@ -143,7 +143,7 @@ Drawn by the mod's own card code (`scripts/previews.ts`), not screenshots.
 
 | Part | Desktop app | Terminal |
 |---|---|---|
-| Tool calls | Icon per kind, spinner while running, lines changed, time taken. `▸` opens the row: the call's input in full and its answer (a read's text with line numbers, a search's matches, the shell card, the diff); a failed call opens by itself | A node on the turn's rail, with the same `▸` |
+| Tool calls | Icon per kind, spinner while running, lines changed, time taken. `▸` opens the row: the call's input in full and its answer (a read's text with line numbers, a search's matches, the shell card, the diff); a failed call stays closed, its error under the row | A node on the turn's rail, with the same `▸` |
 | Edits | Diff card with `+N −M` and numbered lines | Claude Code's own diff |
 | Shell commands | Terminal card with status, stderr apart, long output folded; paths, numbers and error, warning and pass words coloured | Card with the command, the output coloured the same way, `✓` or `✗ exit N`, stderr in red under its own label, each stream folded to 8 + 4 lines (`/skin shell off` for Claude Code's own) |
 | Quiet output (off by default) | Reads, searches and read-only commands fold to one row; a failure keeps its error line | The same |

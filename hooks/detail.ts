@@ -25,8 +25,7 @@ export const DETAIL_LINES = 20
 // The engine's `Code` and `Markdown` take at most 10000 characters a block.
 export const MAX_BLOCK = 9000
 
-export const isOpen = (disclosure: string, isErrored: boolean): boolean =>
-  disclosure === 'open' || (disclosure !== 'closed' && isErrored)
+export const isOpen = (disclosure: string): boolean => disclosure === 'open'
 
 type Fields = Readonly<Record<string, unknown>>
 

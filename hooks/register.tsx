@@ -77,7 +77,7 @@ const countdownsAtom = atom({ plugin: 'skins', key: 'countdowns' } as const, {} 
 const compactingAtom = atom({ plugin: 'skins', key: 'compacting' } as const, false)
 const pinnedAtom = atom({ plugin: 'skins', key: 'pinned' } as const, false)
 const settleAtom = atom({ plugin: 'skins', key: 'settle' } as const, 0)
-// Whether each tool row is open, as the person left it; `auto` opens a failed call.
+// Whether each tool row is open, as the person left it; untouched, it is closed.
 const disclosureAtom = atom({ plugin: 'skins', key: 'disclosure' } as const, 'auto' as Disclosure)
 // Whether an opened row shows its answer whole, past the fold.
 const allAtom = atom({ plugin: 'skins', key: 'showAll' } as const, false)
@@ -965,10 +965,14 @@ export const register: Register = on => {
     const path = fields.file_path ?? fields.notebook_path
     // The chevron opens the row onto the call's input and its answer.
     const disclosure = memberOf(disclosureAtom, e)
-    const open = isOpen(await read($, disclosure), e.props.isErrored)
+    const open = isOpen(await read($, disclosure))
+    const body = bodyOf(e.props.tool, e.props.output, e.props.isErrored, e.props.isRunning, cwd)
+    // A failed call keeps its answer under the row, closed too: a row in an expanded group
+    // gets no ToolResult to draw it.
+    const isAnswered = open || (e.props.isErrored && body.kind !== 'stock')
     const base = await sessionLook($, e, lookOf($.ui.resolve(e), active, e.surface, copy), {
       touched: typeof path === 'string',
-      folds: open,
+      folds: isAnswered,
       cwd,
     })
     const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e, active.prefs) }
@@ -978,15 +982,15 @@ export const register: Register = on => {
     const row = toolRow(look, e.props, kind, target, meta, label, touch)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
 
-    if (!open) {
+    if (!isAnswered) {
       return withSettle($, e, disclosedRow(look, row, false, toggle))
     }
 
     const all = memberOf(allAtom, e)
     const isAll = await read($, all)
     const opened = await openedRows(look, {
-      fields: inputFields(e.props.tool, e.props.input, cwd),
-      body: bodyOf(e.props.tool, e.props.output, e.props.isErrored, e.props.isRunning, cwd),
+      fields: open ? inputFields(e.props.tool, e.props.input, cwd) : [],
+      body,
       command: commandOf(e.props.input),
       isErrored: e.props.isErrored,
       cwd,
@@ -996,7 +1000,7 @@ export const register: Register = on => {
       stock: () => next(e),
     })
 
-    return withSettle($, e, disclosedRow(look, row, true, toggle, opened))
+    return withSettle($, e, disclosedRow(look, row, open, toggle, opened))
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
@@ -1039,14 +1043,14 @@ export const register: Register = on => {
     const needs = { folds: e.surface === 'terminal' && SHELLS.has(e.props.tool) }
     const look = active === null ? undefined : await sessionLook($, e, lookOf($.ui.resolve(e), active, e.surface, copy), needs)
     const columns = e.viewport?.columns ?? 100
-    // An opened row draws the answer itself; one it cannot draw keeps Claude Code's here.
-    const isOpened =
+    // An opened or failed row draws the answer itself; one it cannot draw keeps Claude Code's here.
+    const isAnswered =
       active !== null &&
       kindOf(e.props.tool) !== null &&
-      isOpen(await read($, memberOf(disclosureAtom, e)), e.props.isErrored) &&
+      (e.props.isErrored || isOpen(await read($, memberOf(disclosureAtom, e)))) &&
       bodyOf(e.props.tool, e.props.output, e.props.isErrored, false, '').kind !== 'stock'
 
-    if (isOpened) {
+    if (isAnswered) {
       const { Box } = $.ui.resolve(e)
 
       return <Box />
