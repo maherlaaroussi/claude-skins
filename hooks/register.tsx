@@ -1,5 +1,5 @@
 import { atom, memberOf, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
+import type { AgentStatus, EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
 
 import type { CustomSkin, Disclosure, Prefs, SkinSlot, SkinsMarkdownArgs, Touch, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, listing, nextTables, parsePrefs, runSkinCommand, TOGGLES, withCalm } from './command'
@@ -87,6 +87,10 @@ const touchedAtom = atom({ plugin: 'skins', key: 'touched' } as const, {} as Rec
 const foldsAtom = atom({ plugin: 'skins', key: 'folds' } as const, [] as string[])
 // The main loop's last answer, for `/skin copy`.
 const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
+// Per main-loop turn, oldest first, its duration and the answer it ended on once no background
+// agent ran, null while one still did. A list: an object would order its numeric keys by size.
+const turnEndsAtom = atom({ plugin: 'skins', key: 'turnEnds' } as const, [] as [number, string | null][])
+const ALIVE = new Set<AgentStatus>(['pending', 'running', 'waiting'])
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 const WRITES = new Set([...EDITS, 'NotebookEdit'])
@@ -847,6 +851,11 @@ export const register: Register = on => {
       if (e.answer.trim() !== '') {
         await update($, lastReplyAtom, () => e.answer)
       }
+
+      // A host that cannot list its agents has every turn end on its final answer.
+      const agents = await $.agent.list().catch(() => [])
+      const ending = agents.some(agent => ALIVE.has(agent.status)) ? null : e.answer.trim()
+      await update($, turnEndsAtom, ends => [...ends, [e.durationMs, ending] as [number, string | null]].slice(-KEPT_TURNS))
     }
 
     return next(e)
@@ -1255,7 +1264,13 @@ export const register: Register = on => {
 
     const { prefs } = active
     const segments = replySegments(text, prefs, e.surface)
-    const isTight = e.surface === 'terminal' && (await isUnderNotice($, text))
+    // The answer a turn ends on once no agent runs is the final one: it stands apart. The answer
+    // holds the whole last response, so the reply is its end. Only a reply under a notice reads
+    // the turn ends, so a turn's end redraws no other.
+    const isTight =
+      e.surface === 'terminal' &&
+      (await isUnderNotice($, text)) &&
+      !(await read($, turnEndsAtom)).some(([, answer]) => answer?.endsWith(text.trim()) === true)
     const ui = $.ui.resolve(e)
 
     // A reply skin-code draws is its: Claude Code may run either mod's hook first, and this
@@ -1358,8 +1373,11 @@ export const register: Register = on => {
     const ui = $.ui.resolve(e)
     const footer = footerRow(lookOf(ui, active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
 
-    // On the terminal the footer owns the blank line above it, as a reply does.
-    return e.surface === 'terminal' ? <ui.Box marginTop={1}>{footer}</ui.Box> : footer
+    // On the terminal the footer owns the blank line above it, as a reply does, unless its turn
+    // left background agents running: it then sits right under what that turn drew.
+    const isTight = (await read($, turnEndsAtom)).findLast(([ms]) => ms === e.props.durationMs)?.[1] === null
+
+    return e.surface === 'terminal' && !isTight ? <ui.Box marginTop={1}>{footer}</ui.Box> : footer
   })
 
   // The band above the prompt: context and plan limits. Another mod's drawing there,
