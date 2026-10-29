@@ -47,23 +47,39 @@ function isDrawn(block: ApiContentBlock): boolean {
   }
 }
 
+// The rows Claude Code draws for a user text nobody typed, as the API form frames it: a task's
+// notification, an agent's message, a nested CLAUDE.md the call loaded (`└ Loaded`).
+// shortcut: matches the framing Claude Code 2.1.312 writes, upgrade if a build renames it.
+const NOTIFICATION = /^<task-notification>/
+const MESSAGE = /<agent-message from=/
+const LOADED = /^<system-reminder>\s*Contents of /
+
+const textsOf = (content: readonly ApiContentBlock[]): string[] => content.flatMap(block => (block.type === 'text' ? [String(block.text)] : []))
+const hasResult = (content: readonly ApiContentBlock[]): boolean => content.some(block => block.type === 'tool_result')
+const isNotice = (content: readonly ApiContentBlock[]): boolean => textsOf(content).some(said => NOTIFICATION.test(said) || MESSAGE.test(said))
+// A server tool's call and result (the advisor's), a row Claude Code draws.
+const isServerTool = (block: ApiContentBlock): boolean => block.type === 'server_tool_use' || block.type.endsWith('_tool_result')
+
 // Which tool calls open a run of tool rows: what the transcript drew right before the call
 // is not one of the skin's rows. A prompt, a drawn block and a row Claude Code draws (an
 // agent, a question) end a run; results draw nothing, nor does a user text that rides in
-// beside a result (a skill's).
+// beside a result (a skill's). A notification, an agent's message and the advisor sit
+// tight against the row under them, as one of the skin's rows does.
 export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean> {
   const starts = new Map<string, boolean>()
   let isAfterRow = false
 
   for (const { role, content } of messages) {
-    if (role === 'user' && !content.some(block => block.type === 'tool_result')) {
-      isAfterRow = false
+    if (role === 'user' && (isNotice(content) || !hasResult(content))) {
+      isAfterRow = isNotice(content)
     }
 
     for (const block of role === 'assistant' ? content : []) {
       if (block.type === 'tool_use') {
         starts.set(String(block.id), !isAfterRow)
         isAfterRow = kindOf(String(block.name)) !== null
+      } else if (isServerTool(block)) {
+        isAfterRow = true
       } else if (isDrawn(block)) {
         isAfterRow = false
       }
@@ -71,6 +87,45 @@ export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean>
   }
 
   return starts
+}
+
+type Above = 'row' | 'loaded' | 'other'
+
+// Whether each reply is drawn right under a notification, an agent's message, the advisor or
+// a CLAUDE.md load, by its text: a render names no block. Claude Code draws a load at the end
+// of its group of tool rows, so a load stays above the reply through the calls after it; a
+// message does not.
+export function repliesUnderNotices(messages: readonly ApiMessage[]): Map<string, boolean> {
+  const replies = new Map<string, boolean>()
+  let above: Above = 'other'
+
+  for (const { role, content } of messages) {
+    if (role === 'user') {
+      if (isNotice(content)) {
+        above = 'row'
+      } else if (!hasResult(content)) {
+        above = 'other'
+      } else if (textsOf(content).some(said => LOADED.test(said))) {
+        above = 'loaded'
+      }
+
+      continue
+    }
+
+    for (const block of content) {
+      if (block.type === 'text' && isDrawn(block)) {
+        replies.set(String(block.text).trim(), above !== 'other')
+      }
+
+      if (isServerTool(block)) {
+        above = 'row'
+      } else if (block.type === 'tool_use' ? above === 'row' : isDrawn(block)) {
+        above = 'other'
+      }
+    }
+  }
+
+  return replies
 }
 
 // `mcp__github__search_code` reads as `github:search_code`.

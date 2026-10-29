@@ -27,7 +27,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
-import { kindOf, runStarts, summarize, toolLabel } from './tools'
+import { kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from './tools'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { isDue, isNewer, LATEST_URL, STAR_NOTICE, starStep, updateNotice, versionOf } from './updates'
@@ -325,6 +325,46 @@ async function opensRun($: EngineInterface, id: string): Promise<boolean> {
 // The blank line a tool row owns above it: one when it opens a run of tool rows, else none.
 async function lineAbove($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
   return surface === 'terminal' && id !== undefined && (await opensRun($, id)) ? 1 : 0
+}
+
+// Whether each reply sits right under a notification, an agent's message, the advisor or a
+// CLAUDE.md load, by its text, read from the main transcript, then every agent's on a miss: an
+// agent's view draws its own. A host that cannot read them leaves every reply its blank line,
+// as does an agent the engine no longer lists.
+const underNoticeByText = new Map<string, boolean>()
+let readingReplies: Promise<void> | undefined
+
+async function readReplies($: EngineInterface, key: string): Promise<void> {
+  const learn = (messages: unknown) => {
+    for (const [said, value] of Array.isArray(messages) ? repliesUnderNotices(messages) : []) {
+      underNoticeByText.set(said, value)
+    }
+  }
+
+  learn(await $.session.messages({ as: 'api' }))
+
+  if (!underNoticeByText.has(key)) {
+    const agents = await $.agent.list()
+
+    for (const messages of await Promise.all(agents.map(agent => $.session.messages({ as: 'api', agentId: agent.id })))) {
+      learn(messages)
+    }
+  }
+}
+
+async function isUnderNotice($: EngineInterface, text: string): Promise<boolean> {
+  const key = text.trim()
+
+  if (!underNoticeByText.has(key)) {
+    readingReplies ??= readReplies($, key)
+      .catch(() => undefined)
+      .finally(() => {
+        readingReplies = undefined
+      })
+    await readingReplies
+  }
+
+  return underNoticeByText.get(key) ?? false
 }
 
 const drawnBy = (drawing: string, drawnAt: number) => (key: string, entranceMs: number) => {
@@ -1159,6 +1199,14 @@ export const register: Register = on => {
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const active = await activeSkin($)
 
+    // A task's notification and an agent's message keep Claude Code's row, less the blank
+    // line it puts above it: they sit right under what they report on.
+    if (active !== null && e.surface === 'terminal' && (e.props.task !== undefined || e.props.from !== undefined)) {
+      const { Box } = $.ui.resolve(e)
+
+      return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
+    }
+
     // Off the terminal your messages keep Claude Code's own component: it carries the copy
     // and rewind buttons, the context menu and selectable text, which an outline would lose.
     if (active === null || e.surface !== 'terminal' || !TYPED.has(e.props.origin.kind) || e.props.text.length > MAX_PROMPT) {
@@ -1207,17 +1255,19 @@ export const register: Register = on => {
 
     const { prefs } = active
     const segments = replySegments(text, prefs, e.surface)
+    const isTight = e.surface === 'terminal' && (await isUnderNotice($, text))
+    const ui = $.ui.resolve(e)
 
     // A reply skin-code draws is its: Claude Code may run either mod's hook first, and this
     // keeps the code in the person's VS Code theme whichever it is. skin-code draws the
-    // prose around it through `$.skins.markdown`.
+    // prose around it through `$.skins.markdown`. Under a notice it gives back the blank
+    // line Claude Code puts above it.
     if (segments === null || (await drawnBySkinCode($, text))) {
-      return next(e)
+      return isTight ? <ui.Box flexDirection="column" marginTop={-1}>{await next(e)}</ui.Box> : next(e)
     }
 
     // Every surface's table names Svg, but the terminal draws it as nothing. As text, tables
     // are text grids and code the app's own selectable blocks.
-    const ui = $.ui.resolve(e)
     const svg = e.surface !== 'terminal' && active.prefs.tables === 'on' && 'Svg' in ui ? ui.Svg : undefined
     lastColumns = e.viewport?.columns
     const copy = (copied: string) => {
@@ -1230,8 +1280,9 @@ export const register: Register = on => {
     // A reply of several blocks can be copied whole, as Claude wrote it.
     const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
 
-    // On the terminal a reply owns the blank line above it, as Claude Code's own does.
-    return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
+    // On the terminal a reply owns the blank line above it, as Claude Code's own does, unless
+    // it sits under a notice.
+    return withSettle($, e, e.surface === 'terminal' && !isTight ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
   })
 
   // A slash command's output (`/cost`, `/context`, a plugin's) drawn the way a reply is: its
