@@ -290,6 +290,60 @@ test('an agent keeps Claude Code’s row and the blank line above it; Skill and 
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
+// An agent's message and a task's notification sit right under the row above them, and the
+// reply under one of them, or under a nested CLAUDE.md load, sits right under it.
+test('an agent’s message, a notification and the reply under one own no blank line', async ($, on) => {
+  stubEngine(on)
+  on('agent.list', () => ({ value: [{ id: 'a7' }] }))
+  on('session.messages', ($, e) => ({
+    value:
+      e.agentId === 'a7'
+        ? [
+            { role: 'user', content: [{ type: 'text', text: 'read the screens' }] },
+            { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: {} }] },
+            { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1' }, { type: 'text', text: '<system-reminder>\nContents of /work/CLAUDE.md:\n\n@AGENTS.md\n</system-reminder>\n' }] },
+            { role: 'assistant', content: [{ type: 'text', text: 'Now the filter bars.' }] },
+          ]
+        : [
+            { role: 'user', content: [{ type: 'text', text: 'review it' }] },
+            { role: 'assistant', content: [{ type: 'text', text: 'Waiting on the reviewers.' }] },
+            { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "dig" finished</summary>\n</task-notification>' }] },
+            { role: 'assistant', content: [{ type: 'text', text: 'The **first** reviewer found nothing.' }] },
+          ],
+  }))
+
+  const rows = [
+    { origin: { kind: 'task-notification' }, task: { id: 'a7', status: 'completed' } },
+    { origin: { kind: 'unclassified' }, from: { name: 'devi-comment-sicko' } },
+  ]
+
+  for (const [i, extra] of rows.entries()) {
+    for (const surface of SURFACES) {
+      const row = await $.ui.mount({ ...SITE, surface, component: 'UserMessage', requestId: `n${i}${surface}`, props: { text: 'Agent "dig" finished', isExpanded: false, ...extra } as never })
+      expect(await row.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: row ${i}`).toEqual(surface === 'terminal' ? ['marginTop: -1'] : [])
+      await row.unmount()
+    }
+  }
+
+  const reply = async (text: string) => {
+    const drawn = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: text, props: { text, isFirstOfReply: true } })
+    const lines = blankLines(await drawn.find({ type: 'Box' }))
+    await drawn.unmount()
+
+    return lines
+  }
+
+  expect(await reply('The **first** reviewer found nothing.')).toEqual([])
+  expect(await reply('Now the filter bars.'), 'under a CLAUDE.md load, in an agent’s view').toEqual([])
+  expect(await reply('Waiting on the reviewers.')).toEqual(['marginTop: 1'])
+
+  // Claude Code's own drawing gives back the line it puts above.
+  await runSkin($, 'markdown off')
+  expect(await reply('Now the filter bars.')).toEqual(['marginTop: -1'])
+  expect(await reply('Waiting on the reviewers.')).toEqual([])
+})
+
 // The first tool row after a prompt, a reply, thinking or a block Claude Code draws (an
 // agent's) owns the blank line above it; the rows after it in the run own none.
 test('a tool row that opens a run owns the blank line above it, the rows after it none', async ($, on) => {

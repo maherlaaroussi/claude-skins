@@ -15,7 +15,7 @@ import { countdownOf, countdownsOf, limitLabel, meterColor, metersKey, metersOf,
 import { isNewer, starStep, updateNotice } from '../hooks/updates'
 import { deepen, forTheme, gnomeDark, isLightTheme, macDark, resolveLight, toLight, windowsDark } from '../hooks/light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
-import { kindOf, runStarts, summarize, toolLabel } from '../hooks/tools'
+import { kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from '../hooks/tools'
 import { SKINS } from '../hooks/themes'
 import { inlineRuns, splitBlocks } from '../hooks/blocks'
 import { errorLine, isQuiet, isReadOnlyShell, segmentsOf } from '../hooks/quiet'
@@ -1364,7 +1364,7 @@ test('thinking with text ends a run, and empty thinking does not', () => {
   expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, c: false })
 })
 
-test('a block Claude Code draws between two calls ends a run: the advisor, a question, an agent', () => {
+test('a question and an agent end a run; the advisor sits tight against the row under it', () => {
   const starts = runStarts([
     user(text('check the spec')),
     assistant(use('a')),
@@ -1380,5 +1380,78 @@ test('a block Claude Code draws between two calls ends a run: the advisor, a que
     assistant(use('d'), use('e', 'mcp__github__search_code')),
   ] as never)
 
-  expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, q: false, c: true, g: false, d: true, e: false })
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, q: false, c: true, g: false, d: true, e: false })
+})
+
+// As the API form frames them: a task's notification as a message of its own, an agent's hand-back
+// and a nested CLAUDE.md beside a result.
+const notification = text(`<task-notification>
+<task-id>a1</task-id>
+<status>completed</status>
+<summary>Agent "dig" finished</summary>
+</task-notification>`)
+const handBack = text(`<system-reminder id="r1">
+Another Claude session sent a message while you were working:
+<agent-message from="a1">
+Done.
+</agent-message>
+</system-reminder>`)
+const loaded = text(`<system-reminder>
+Contents of /work/app/CLAUDE.md:
+
+@AGENTS.md
+</system-reminder>
+`)
+
+test('a reply drawn right under an agent’s message, a notification or a CLAUDE.md load sits under it', () => {
+  const replies = repliesUnderNotices([
+    user(text('review it'), loaded),
+    assistant(text('Starting.'), use('a')),
+    user(result('a'), handBack),
+    assistant(thought(''), text('The first reviewer found nothing.')),
+    user(notification),
+    assistant(text('One down.')),
+    user(text('and the docs')),
+    assistant(text('On it.'), use('b')),
+    user(result('b'), loaded),
+    assistant(use('c', 'Read')),
+    user(result('c')),
+    assistant(text('Now the screens.'), use('d')),
+    user(result('d'), handBack),
+    assistant(use('e')),
+    user(result('e')),
+    assistant(text('Both done.'), use('f')),
+    user(result('f'), handBack),
+    assistant(thought('The hand-back changes the plan.'), text('Replanning.'), use('g')),
+    user(result('g')),
+    assistant({ type: 'server_tool_use', id: 's1', name: 'advisor', input: {} }, { type: 'advisor_tool_result', tool_use_id: 's1', content: {} }, text('The advisor agrees.')),
+  ] as never)
+
+  expect(Object.fromEntries(replies)).toEqual({
+    'Starting.': false,
+    'The first reviewer found nothing.': true,
+    'One down.': true,
+    'On it.': false,
+    'Now the screens.': true,
+    'Both done.': false,
+    'Replanning.': false,
+    'The advisor agrees.': true,
+  })
+})
+
+test('a tool row right under a notification or an agent’s message opens no run', () => {
+  const starts = runStarts([
+    user(text('review it')),
+    assistant(text('Waiting.')),
+    user(notification),
+    assistant(use('a')),
+    user(result('a'), handBack),
+    assistant(use('b', 'Agent')),
+    user(result('b'), handBack),
+    assistant(use('c')),
+    user(text('and the docs')),
+    assistant(use('d')),
+  ] as never)
+
+  expect(Object.fromEntries(starts)).toEqual({ a: false, b: false, c: false, d: true })
 })
