@@ -1,4 +1,4 @@
-import type { SessionMessage } from 'claude-code'
+import type { ApiContentBlock, ApiMessage } from 'claude-code'
 
 import { oneLine, shortenPath } from './format'
 import type { Kind } from './skin'
@@ -32,24 +32,41 @@ export function kindOf(tool: string): Kind | null {
   return BUILTIN[tool] ?? null
 }
 
-// Which tool calls open a run of tool rows: the call the transcript drew right before it,
-// if any, was not a tool call but a prompt or a reply. Thinking and results draw nothing
-// between two calls, nor does a user text that rides in after a result (a skill's).
-export function runStarts(messages: readonly SessionMessage[]): Map<string, boolean> {
+// What the terminal draws of an assistant block between two tool calls: a reply, thinking
+// that has text, and a server tool's call and result (the advisor's), drawn by Claude Code.
+function isDrawn(block: ApiContentBlock): boolean {
+  switch (block.type) {
+    case 'text':
+      return String(block.text).trim() !== ''
+    case 'thinking':
+      return String(block.thinking).trim() !== ''
+    case 'redacted_thinking':
+      return false
+    default:
+      return true
+  }
+}
+
+// Which tool calls open a run of tool rows: what the transcript drew right before the call
+// is not one of the skin's rows. A prompt, a drawn block and a row Claude Code draws (an
+// agent, a question) end a run; results draw nothing, nor does a user text that rides in
+// beside a result (a skill's).
+export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean> {
   const starts = new Map<string, boolean>()
-  let isAfterCall = false
+  let isAfterRow = false
 
-  for (const [i, message] of messages.entries()) {
-    const hasResults = (message.toolResults?.length ?? 0) > 0
-    const isInjected = (messages[i - 1]?.toolResults?.length ?? 0) > 0
-
-    if (message.text !== '' && !hasResults && !(message.role === 'user' && isInjected)) {
-      isAfterCall = false
+  for (const { role, content } of messages) {
+    if (role === 'user' && !content.some(block => block.type === 'tool_result')) {
+      isAfterRow = false
     }
 
-    for (const use of message.toolUses) {
-      starts.set(use.tool_use_id, !isAfterCall)
-      isAfterCall = true
+    for (const block of role === 'assistant' ? content : []) {
+      if (block.type === 'tool_use') {
+        starts.set(String(block.id), !isAfterRow)
+        isAfterRow = kindOf(String(block.name)) !== null
+      } else if (isDrawn(block)) {
+        isAfterRow = false
+      }
     }
   }
 

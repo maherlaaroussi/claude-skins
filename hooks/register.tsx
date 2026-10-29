@@ -90,9 +90,6 @@ const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 const WRITES = new Set([...EDITS, 'NotebookEdit'])
-// The subagent tool, `Task` before Claude Code renamed it.
-const AGENTS = new Set(['Agent', 'Task'])
-
 // Only a person's own typing becomes a prompt row: a task notification or a peer's
 // message is not theirs to dress as theirs.
 const TYPED = new Set(['composer', 'bridge', 'sdk'])
@@ -309,7 +306,7 @@ let readingRuns: Promise<void> | undefined
 async function opensRun($: EngineInterface, id: string): Promise<boolean> {
   if (!runStartsById.has(id)) {
     readingRuns ??= $.session
-      .messages()
+      .messages({ as: 'api' })
       .then(messages => {
         for (const [key, value] of runStarts(messages)) {
           runStartsById.set(key, value)
@@ -986,14 +983,6 @@ export const register: Register = on => {
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     const kind = kindOf(e.props.tool)
     const active = await activeSkin($)
-
-    if (active !== null && e.surface === 'terminal' && AGENTS.has(e.props.tool)) {
-      const { Box } = $.ui.resolve(e)
-
-      // Claude Code's row keeps its live progress, and brings the blank line it puts above
-      // every row of its own: kept when the row opens a run, taken back when it does not.
-      return (await lineAbove($, e.surface, e.props.tool_use_id)) === 1 ? next(e) : <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
-    }
 
     if (kind === null || active === null) {
       return next(e)
