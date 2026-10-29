@@ -1323,34 +1323,62 @@ test('chart and math cards say when their entrance ends', async () => {
   }
 })
 
-// The transcript as `$.session.messages()` hands it: one entry per stored block.
-const said = (text: string) => ({ role: 'assistant' as const, text, toolUses: [] })
-const called = (...ids: string[]) => ({ role: 'assistant' as const, text: '', toolUses: ids.map(tool_use_id => ({ tool_use_id, tool: 'Bash', input: {} })) })
-const answered = (text = '') => ({ role: 'user' as const, text, toolUses: [], toolResults: [{ tool_use_id: 'x', text: 'ok', isError: false }] })
-const typed = (text: string) => ({ role: 'user' as const, text, toolUses: [] })
+// The transcript as `$.session.messages({ as: 'api' })` hands it: one message per turn side.
+const assistant = (...content: object[]) => ({ role: 'assistant' as const, content })
+const user = (...content: object[]) => ({ role: 'user' as const, content })
+const text = (said: string) => ({ type: 'text', text: said })
+const thought = (thinking: string) => ({ type: 'thinking', thinking, signature: 'sig' })
+const use = (id: string, name = 'Bash') => ({ type: 'tool_use', id, name, input: {} })
+const result = (id: string) => ({ type: 'tool_result', tool_use_id: id, content: 'ok' })
 
-test('a tool call opens a run when what the transcript drew before it is not a tool call', () => {
+test('a tool call opens a run when what the transcript drew before it is not one of the skin rows', () => {
   const starts = runStarts([
-    typed('fix the build'),
-    said(''),
-    called('a'),
-    answered(),
-    said(''),
-    called('b', 'c'),
-    answered(),
-    said('Now the tests.'),
-    called('d'),
-    answered(),
-    // A skill's text rides in after its result and is not drawn.
-    typed('Base directory for this skill: /skills/commit'),
-    called('e'),
-    answered('Base directory for this skill: /skills/commit'),
-    called('f'),
-    answered(),
-    said('Done.'),
-    typed('and the docs'),
-    called('g'),
+    user(text('fix the build')),
+    assistant(thought(''), use('a')),
+    user(result('a')),
+    assistant(use('b'), use('c')),
+    user(result('b'), result('c')),
+    assistant(text('Now the tests.'), use('d')),
+    // A skill's text rides in beside its result and is not drawn.
+    user(result('d'), text('Base directory for this skill: /skills/commit')),
+    assistant(use('e')),
+    user(result('e')),
+    assistant(text('Done.')),
+    user(text('and the docs')),
+    assistant(use('f')),
   ] as never)
 
-  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, c: false, d: true, e: false, f: false, g: true })
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, c: false, d: true, e: false, f: true })
+})
+
+test('thinking with text ends a run, and empty thinking does not', () => {
+  const starts = runStarts([
+    user(text('read the plan')),
+    assistant(use('a')),
+    user(result('a')),
+    assistant(thought('I read the plan; now the specs.'), use('b')),
+    user(result('b')),
+    assistant(thought(''), { type: 'redacted_thinking', data: 'x' }, use('c')),
+  ] as never)
+
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, c: false })
+})
+
+test('a block Claude Code draws between two calls ends a run: the advisor, a question, an agent', () => {
+  const starts = runStarts([
+    user(text('check the spec')),
+    assistant(use('a')),
+    user(result('a')),
+    assistant({ type: 'server_tool_use', id: 's1', name: 'advisor', input: {} }, { type: 'advisor_tool_result', tool_use_id: 's1', content: {} }, use('b')),
+    user(result('b')),
+    assistant(use('q', 'AskUserQuestion')),
+    user(result('q')),
+    assistant(use('c')),
+    user(result('c')),
+    assistant(use('g', 'Agent')),
+    user(result('g')),
+    assistant(use('d'), use('e', 'mcp__github__search_code')),
+  ] as never)
+
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, q: false, c: true, g: false, d: true, e: false })
 })
