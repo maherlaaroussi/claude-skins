@@ -27,7 +27,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
-import { kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from './tools'
+import { isHidden, kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from './tools'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { isDue, isNewer, LATEST_URL, STAR_NOTICE, starStep, updateNotice, versionOf } from './updates'
@@ -1032,6 +1032,13 @@ export const register: Register = on => {
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     const kind = kindOf(e.props.tool)
     const active = await activeSkin($)
+
+    // Claude Code's own row keeps its drawing, less the blank line it puts above it inside a run.
+    if (kind === null && active !== null && e.surface === 'terminal' && !isHidden(e.props.tool) && !(await opensRun($, e.props.tool_use_id))) {
+      const { Box } = $.ui.resolve(e)
+
+      return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
+    }
 
     if (kind === null || active === null) {
       return next(e)

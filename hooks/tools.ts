@@ -48,26 +48,27 @@ function isDrawn(block: ApiContentBlock): boolean {
 }
 
 // The rows Claude Code draws for a user text nobody typed, as the API form frames it: a task's
-// notification (inside a system reminder), an agent's message, a nested CLAUDE.md the call
+// notification (inside its system reminder), an agent's message, a nested CLAUDE.md the call
 // loaded (`└ Loaded`).
 // shortcut: matches the framing Claude Code 2.1.312 writes, upgrade if a build renames it.
-const NOTIFICATION = /<task-notification>/
+const NOTIFICATION = /^(?:<system-reminder>\s*\[SYSTEM NOTIFICATION[\s\S]*?)?<task-notification>/
 const MESSAGE = /<agent-message from=/
 const LOADED = /^<system-reminder>\s*Contents of /
 
 const textsOf = (content: readonly ApiContentBlock[]): string[] => content.flatMap(block => (block.type === 'text' ? [String(block.text)] : []))
 const hasResult = (content: readonly ApiContentBlock[]): boolean => content.some(block => block.type === 'tool_result')
 const isNotice = (content: readonly ApiContentBlock[]): boolean => textsOf(content).some(said => NOTIFICATION.test(said) || MESSAGE.test(said))
-// A tool search, which Claude Code draws nothing of.
-const isSearch = (block: ApiContentBlock): boolean => block.type === 'tool_use' && block.name === 'ToolSearch'
+// A tool Claude Code draws nothing of: a tool search.
+export const isHidden = (tool: string): boolean => tool === 'ToolSearch'
+const isSearch = (block: ApiContentBlock): boolean => block.type === 'tool_use' && isHidden(String(block.name))
 // A server tool's call and result (the advisor's), a row Claude Code draws.
 const isServerTool = (block: ApiContentBlock): boolean => block.type === 'server_tool_use' || block.type.endsWith('_tool_result')
 
 // Which tool calls open a run of tool rows: what the transcript drew right before the call
-// is not one of the skin's rows. A prompt, a drawn block and a row Claude Code draws (an
-// agent, a question) end a run; results draw nothing, nor does a user text that rides in
-// beside a result (a skill's). A notification, an agent's message and the advisor sit
-// tight against the row under them, as one of the skin's rows does.
+// is not a row. A prompt and a drawn block end a run; results draw nothing, nor does a user
+// text that rides in beside a result (a skill's). A row Claude Code draws (an agent, a
+// question, a stopped task), a notification, an agent's message and the advisor sit tight
+// against the row under them, as one of the skin's rows does.
 export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean> {
   const starts = new Map<string, boolean>()
   let isAfterRow = false
@@ -82,7 +83,7 @@ export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean>
         continue
       } else if (block.type === 'tool_use') {
         starts.set(String(block.id), !isAfterRow)
-        isAfterRow = kindOf(String(block.name)) !== null
+        isAfterRow = true
       } else if (isServerTool(block)) {
         isAfterRow = true
       } else if (isDrawn(block)) {
