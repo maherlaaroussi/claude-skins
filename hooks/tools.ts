@@ -48,15 +48,18 @@ function isDrawn(block: ApiContentBlock): boolean {
 }
 
 // The rows Claude Code draws for a user text nobody typed, as the API form frames it: a task's
-// notification, an agent's message, a nested CLAUDE.md the call loaded (`└ Loaded`).
+// notification (inside a system reminder), an agent's message, a nested CLAUDE.md the call
+// loaded (`└ Loaded`).
 // shortcut: matches the framing Claude Code 2.1.312 writes, upgrade if a build renames it.
-const NOTIFICATION = /^<task-notification>/
+const NOTIFICATION = /<task-notification>/
 const MESSAGE = /<agent-message from=/
 const LOADED = /^<system-reminder>\s*Contents of /
 
 const textsOf = (content: readonly ApiContentBlock[]): string[] => content.flatMap(block => (block.type === 'text' ? [String(block.text)] : []))
 const hasResult = (content: readonly ApiContentBlock[]): boolean => content.some(block => block.type === 'tool_result')
 const isNotice = (content: readonly ApiContentBlock[]): boolean => textsOf(content).some(said => NOTIFICATION.test(said) || MESSAGE.test(said))
+// A tool search, which Claude Code draws nothing of.
+const isSearch = (block: ApiContentBlock): boolean => block.type === 'tool_use' && block.name === 'ToolSearch'
 // A server tool's call and result (the advisor's), a row Claude Code draws.
 const isServerTool = (block: ApiContentBlock): boolean => block.type === 'server_tool_use' || block.type.endsWith('_tool_result')
 
@@ -75,7 +78,9 @@ export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean>
     }
 
     for (const block of role === 'assistant' ? content : []) {
-      if (block.type === 'tool_use') {
+      if (isSearch(block)) {
+        continue
+      } else if (block.type === 'tool_use') {
         starts.set(String(block.id), !isAfterRow)
         isAfterRow = kindOf(String(block.name)) !== null
       } else if (isServerTool(block)) {
@@ -113,6 +118,10 @@ export function repliesUnderNotices(messages: readonly ApiMessage[]): Map<string
     }
 
     for (const block of content) {
+      if (isSearch(block)) {
+        continue
+      }
+
       if (block.type === 'text' && isDrawn(block)) {
         replies.set(String(block.text).trim(), above !== 'other')
       }
