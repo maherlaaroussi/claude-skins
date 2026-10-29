@@ -1377,7 +1377,7 @@ test('thinking with text ends a run, and empty thinking does not', () => {
   expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, c: false })
 })
 
-test('a question and an agent end a run; the advisor sits tight against the row under it', () => {
+test('a question, an agent and the advisor sit tight against the row under them', () => {
   const starts = runStarts([
     user(text('check the spec')),
     assistant(use('a')),
@@ -1393,7 +1393,7 @@ test('a question and an agent end a run; the advisor sits tight against the row 
     assistant(use('d'), use('e', 'mcp__github__search_code')),
   ] as never)
 
-  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, q: false, c: true, g: false, d: true, e: false })
+  expect(Object.fromEntries(starts)).toEqual({ a: true, b: false, q: false, c: false, g: false, d: false, e: false })
 })
 
 // As the API form frames them: a task's notification as a message of its own, an agent's hand-back
@@ -1469,7 +1469,9 @@ test('a tool row right under a notification or an agent’s message opens no run
     assistant(use('c')),
     user(text('and the docs')),
     assistant(use('d')),
+    user(text('<system-reminder>\nContents of /work/app/CLAUDE.md:\n\nA <task-notification> ends a run.\n</system-reminder>'), text('why the blank line?')),
+    assistant(use('e')),
   ] as never)
 
-  expect(Object.fromEntries(starts)).toEqual({ a: false, b: false, c: false, d: true })
+  expect(Object.fromEntries(starts)).toEqual({ a: false, b: false, c: false, d: true, e: true })
 })

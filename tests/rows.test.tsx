@@ -271,14 +271,26 @@ test('a prompt, a reply and the turn footer each own the blank line above them, 
   expect(blankLines(await footer.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
 })
 
-test('an agent keeps Claude Code’s row and the blank line above it; Skill and task calls get the skin’s row', async ($, on) => {
+// Claude Code puts a blank line above its own rows (an agent, a stopped task): one that opens
+// a run keeps it, one inside a run gives it back.
+test('an agent and a stopped task keep Claude Code’s row, tight inside a run; Skill and task calls get the skin’s row', async ($, on) => {
   stubEngine(on)
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', content: [{ type: 'text', text: 'dig' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'g1', name: 'Agent', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'g1' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 's1', name: 'TaskStop', input: {} }] },
+    ] as never,
+  }))
 
   for (const surface of SURFACES) {
-    const agent = await $.ui.mount(toolUse(call('Agent', { description: 'dig' }, { tool_use_id: 'g1' }), surface))
-    expect(await agent.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-    expect(blankLines(await agent.find({ type: 'Box' })), `${surface}: Claude Code's own row, untouched`).toEqual([])
-    await agent.unmount()
+    for (const [id, tool, tight] of [['g1', 'Agent', false], ['s1', 'TaskStop', true]] as const) {
+      const row = await $.ui.mount(toolUse(call(tool, { description: 'dig' }, { tool_use_id: id }), surface))
+      expect(await row.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: ${tool}`).toEqual(surface === 'terminal' && tight ? ['marginTop: -1'] : [])
+      await row.unmount()
+    }
   }
 
   const update = await $.ui.mount(toolUse(call('TaskUpdate', { taskId: '3', status: 'completed' }, { tool_use_id: 'g3' })))
@@ -422,7 +434,7 @@ test('a tool row that opens a run owns the blank line above it, the rows after i
 
   expect(await row('r1')).toEqual(['marginTop: 1'])
   expect(await row('r2')).toEqual([])
-  expect(await row('r4')).toEqual(['marginTop: 1'])
+  expect(await row('r4'), 'under an agent').toEqual([])
   expect(await row('r5')).toEqual([])
 })
 
