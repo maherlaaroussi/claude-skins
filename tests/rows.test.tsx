@@ -344,6 +344,61 @@ test('an agent’s message, a notification and the reply under one own no blank 
   expect(await reply('Waiting on the reviewers.')).toEqual([])
 })
 
+// While background agents still run, the turn's footer sits right under its reply. The reply
+// a turn ends on once none runs is the final one: it owns the blank line above it, under a
+// notification too, and its footer the one below it.
+test('the final reply and its footer breathe, a turn that leaves agents running stays tight', async ($, on) => {
+  stubEngine(on)
+  let agents = [{ id: 'a1', status: 'running' }]
+  on('agent.list', () => ({ value: agents }))
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', content: [{ type: 'text', text: 'review it' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Waiting on the reviewers.' }] },
+      { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "dig" finished</summary>\n</task-notification>' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'One down, one to go.' }] },
+      { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "docs" finished</summary>\n</task-notification>' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Both reviews are in.' }] },
+    ],
+  }))
+  on('turn.complete', () => ({ text: '' }))
+  const turn = { isAborted: false, reason: 'answer' } as const
+  const footer = async (durationMs: number) => {
+    const drawn = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'TurnDuration', requestId: `f${durationMs}`, props: { word: 'Baked', durationMs } })
+    const lines = blankLines(await drawn.find({ type: 'Box' }))
+    await drawn.unmount()
+
+    return lines
+  }
+
+  // Enough longer turns to fill what the skin keeps, so a short one is not the first dropped.
+  for (let i = 0; i < 40; i++) {
+    await $.turn.complete({ ...turn, turnId: `old${i}`, answer: 'Reading.', durationMs: 100_000 + i })
+  }
+
+  await $.turn.complete({ ...turn, turnId: 't1', answer: 'Waiting on the reviewers.', durationMs: 5000 })
+  agents = [{ id: 'a1', status: 'waiting' }]
+  await $.turn.complete({ ...turn, turnId: 't2', answer: 'One down, one to go.', durationMs: 6000 })
+  expect(await footer(5000)).toEqual([])
+  expect(await footer(6000)).toEqual([])
+
+  const mid = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'r2', props: { text: 'One down, one to go.', isFirstOfReply: true } })
+  expect(blankLines(await mid.find({ type: 'Box' }))).toEqual([])
+
+  const final = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'r3', props: { text: 'Both reviews are in.', isFirstOfReply: true } })
+  expect(blankLines(await final.find({ type: 'Box' })), 'still streaming, under a notification').toEqual([])
+
+  agents = [{ id: 'a1', status: 'completed' }]
+  await $.turn.complete({ ...turn, turnId: 't3', answer: 'Reading the second review.\n\nBoth reviews are in.', durationMs: 9000 })
+  expect(blankLines(await final.find({ type: 'Box' })), 'drawn again once the turn ends').toEqual(['marginTop: 1'])
+  expect(await footer(9000)).toEqual(['marginTop: 1'])
+
+  await $.turn.complete({ ...turn, turnId: 't4', answer: 'Anything else?', durationMs: 200_000 })
+  expect(blankLines(await final.find({ type: 'Box' })), 'kept past the next turn').toEqual(['marginTop: 1'])
+  expect(await footer(5000), 'kept past the next turn').toEqual([])
+  expect(await footer(64000), 'a turn this session did not see').toEqual(['marginTop: 1'])
+})
+
 // The first tool row after a prompt, a reply, thinking or a block Claude Code draws (an
 // agent's) owns the blank line above it; the rows after it in the run own none.
 test('a tool row that opens a run owns the blank line above it, the rows after it none', async ($, on) => {
