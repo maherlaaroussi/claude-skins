@@ -1331,6 +1331,19 @@ const thought = (thinking: string) => ({ type: 'thinking', thinking, signature: 
 const use = (id: string, name = 'Bash') => ({ type: 'tool_use', id, name, input: {} })
 const result = (id: string) => ({ type: 'tool_result', tool_use_id: id, content: 'ok' })
 
+test('a tool search draws nothing, so the tool row after it stays in the run', () => {
+  const starts = runStarts([
+    user(text('restart the backend')),
+    assistant(use('a', 'PowerShell')),
+    user(result('a')),
+    assistant(thought(''), use('s', 'ToolSearch')),
+    user(result('s'), text('Tool loaded.')),
+    assistant(use('b')),
+  ] as never)
+
+  expect(starts.get('b')).toBe(false)
+})
+
 test('a tool call opens a run when what the transcript drew before it is not one of the skin rows', () => {
   const starts = runStarts([
     user(text('fix the build')),
@@ -1385,11 +1398,16 @@ test('a question and an agent end a run; the advisor sits tight against the row 
 
 // As the API form frames them: a task's notification as a message of its own, an agent's hand-back
 // and a nested CLAUDE.md beside a result.
-const notification = text(`<task-notification>
+const notification = text(`<system-reminder>
+[SYSTEM NOTIFICATION - NOT USER INPUT]
+This is an automated background-task event, NOT a message from the user.
+
+<task-notification>
 <task-id>a1</task-id>
 <status>completed</status>
 <summary>Agent "dig" finished</summary>
-</task-notification>`)
+</task-notification>
+</system-reminder>`)
 const handBack = text(`<system-reminder id="r1">
 Another Claude session sent a message while you were working:
 <agent-message from="a1">
