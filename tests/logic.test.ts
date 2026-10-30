@@ -15,7 +15,7 @@ import { countdownOf, countdownsOf, limitLabel, meterColor, metersKey, metersOf,
 import { isNewer, starStep, updateNotice } from '../hooks/updates'
 import { deepen, forTheme, gnomeDark, isLightTheme, macDark, resolveLight, toLight, windowsDark } from '../hooks/light'
 import { parseFolders, prefsFor, withFolder, withoutFolder } from '../hooks/folders'
-import { kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from '../hooks/tools'
+import { kindOf, repliesUnderNotices, rowsAboveAdvisor, runStarts, summarize, toolLabel } from '../hooks/tools'
 import { SKINS } from '../hooks/themes'
 import { inlineRuns, splitBlocks } from '../hooks/blocks'
 import { errorLine, isQuiet, isReadOnlyShell, segmentsOf } from '../hooks/quiet'
@@ -1375,6 +1375,28 @@ test('thinking with text ends a run, and empty thinking does not', () => {
   ] as never)
 
   expect(Object.fromEntries(starts)).toEqual({ a: true, b: true, c: false })
+})
+
+// As an agent's transcript holds it: a Bash call, its result, empty thinking, then the advisor.
+test('the row drawn right above the advisor is known by its call', () => {
+  const advisor = (id: string) => [{ type: 'server_tool_use', id, name: 'advisor', input: {} }, { type: 'advisor_tool_result', tool_use_id: id, content: {} }]
+  const above = rowsAboveAdvisor([
+    user(text('build the bakeoff')),
+    assistant(use('a'), use('b', 'Read')),
+    user(result('a'), result('b')),
+    assistant(thought(''), use('c')),
+    user(result('c')),
+    assistant(thought(''), ...advisor('s1'), text('Writing the generator.'), use('d')),
+    user(result('d')),
+    assistant(text('Checking first.'), ...advisor('s2')),
+    user(text('go on')),
+    assistant(...advisor('s3')),
+    assistant(use('e'), use('f', 'ToolSearch')),
+    user(result('e'), result('f')),
+    assistant(...advisor('s4')),
+  ] as never)
+
+  expect([...above]).toEqual(['c', 'e'])
 })
 
 test('a question, an agent and the advisor sit tight against the row under them', () => {

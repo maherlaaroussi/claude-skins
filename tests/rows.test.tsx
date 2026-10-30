@@ -302,6 +302,48 @@ test('an agent and a stopped task keep Claude Code’s row, tight inside a run; 
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
+// Claude Code draws the advisor's row with a blank line above it and no hook to take it back,
+// so the tool row right above gives it back, once the advisor lands and on a resume.
+test('the tool row right above the advisor gives back the advisor’s blank line', async ($, on) => {
+  stubEngine(on)
+  const advisor = { type: 'server_tool_use', id: 's1', name: 'advisor', input: {} }
+  const before = [
+    { role: 'user', content: [{ type: 'text', text: 'build the bakeoff' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1' }] },
+  ]
+  let agentMessages = before
+  on('agent.list', () => ({ value: [{ id: 'a7' }] }))
+  on('session.messages', ($, e) => ({
+    value: (e.agentId === 'a7'
+      ? agentMessages
+      : [
+          { role: 'user', content: [{ type: 'text', text: 'dig' }] },
+          { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: {} }, { type: 'tool_use', id: 'r2', name: 'Read', input: {} }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1' }, { type: 'tool_result', tool_use_id: 'r2' }] },
+          { role: 'assistant', content: [advisor] },
+        ]) as never,
+  }))
+
+  const calls = [call('Read', {}, { tool_use_id: 'r1' }), call('Read', {}, { tool_use_id: 'r2' })]
+  const group = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'ToolGroup', requestId: 'g1', props: { calls, isActive: false, isExpanded: false } })
+  expect(blankLines(await group.find({ type: 'Box' })), 'a group opening a run, on a resume').toEqual(['marginTop: 1', 'marginBottom: -1'])
+  await group.unmount()
+
+  const row = await $.ui.mount(toolUse(call('Bash', { command: 'ls' }, { tool_use_id: 'b1' })))
+  expect(blankLines(await row.find({ type: 'Box' }))).toEqual([])
+
+  agentMessages = [...before, { role: 'assistant', content: [advisor] }]
+  const landed = { door: 'response', agentId: 'a7', message: { type: 'assistant', role: 'assistant', content: [advisor] } } as never
+
+  // An older kit (the pinned CI build) cannot append a row at all: nothing to check there.
+  if (!(await $.session.append(landed).then(() => true, () => false))) {
+    return
+  }
+
+  expect(blankLines(await row.find({ type: 'Box' })), 'drawn again once the advisor lands, in an agent’s view').toEqual(['marginBottom: -1'])
+})
+
 // An agent's message and a task's notification sit right under the row above them, and the
 // reply under one of them, or under a nested CLAUDE.md load, sits right under it.
 test('an agent’s message, a notification and the reply under one own no blank line', async ($, on) => {
