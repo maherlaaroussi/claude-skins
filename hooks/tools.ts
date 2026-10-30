@@ -95,6 +95,34 @@ export function runStarts(messages: readonly ApiMessage[]): Map<string, boolean>
   return starts
 }
 
+// The tool calls whose row is drawn right above an advisor call: Claude Code draws the advisor's
+// row with a blank line above it and no hook to take it back, so the row above gives it back.
+export function rowsAboveAdvisor(messages: readonly ApiMessage[]): Set<string> {
+  const above = new Set<string>()
+  let row: string | undefined
+
+  for (const { role, content } of messages) {
+    if (role === 'user' && (isNotice(content) || !hasResult(content))) {
+      row = undefined
+    }
+
+    for (const block of role === 'assistant' ? content : []) {
+      if (isSearch(block)) {
+        continue
+      } else if (block.type === 'tool_use') {
+        row = String(block.id)
+      } else if (block.type === 'server_tool_use' && block.name === 'advisor' && row !== undefined) {
+        above.add(row)
+        row = undefined
+      } else if (isServerTool(block) || isDrawn(block)) {
+        row = undefined
+      }
+    }
+  }
+
+  return above
+}
+
 type Above = 'row' | 'loaded' | 'other'
 
 // Whether each reply is drawn right under a notification, an agent's message, the advisor or

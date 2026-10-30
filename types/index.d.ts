@@ -129,6 +129,8 @@ declare module 'claude-code' {
       command: StateFamily<string>
       // Each tool row's chevron, and whether its opened answer shows past the fold.
       disclosure: StateFamily<Disclosure>
+      // Each tool row the advisor's row landed right under, once it did.
+      aboveAdvisor: StateFamily<boolean>
       showAll: StateFamily<boolean>
       // Files the turn created or edited, by absolute path, for their colour in rows and prose.
       touched: Record<string, Touch>

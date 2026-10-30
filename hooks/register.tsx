@@ -27,7 +27,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
-import { isHidden, kindOf, repliesUnderNotices, runStarts, summarize, toolLabel } from './tools'
+import { isHidden, kindOf, repliesUnderNotices, rowsAboveAdvisor, runStarts, summarize, toolLabel } from './tools'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { isDue, isNewer, LATEST_URL, STAR_NOTICE, starStep, updateNotice, versionOf } from './updates'
@@ -90,6 +90,8 @@ const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
 // Per main-loop turn, oldest first, its duration and the answer it ended on once no background
 // agent ran, null while one still did. A list: an object would order its numeric keys by size.
 const turnEndsAtom = atom({ plugin: 'skins', key: 'turnEnds' } as const, [] as [number, string | null][])
+// Each tool row the advisor's row landed right under, so a row drawn before it is drawn again.
+const aboveAdvisorAtom = atom({ plugin: 'skins', key: 'aboveAdvisor' } as const, false)
 const ALIVE = new Set<AgentStatus>(['pending', 'running', 'waiting'])
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
@@ -305,6 +307,7 @@ const groupStarts = new Map<string, boolean>()
 // once for every call it holds; the rows a resume draws at once share the one read. A host
 // that cannot read the transcript leaves every row in the run before it, as before.
 const runStartsById = new Map<string, boolean>()
+const aboveAdvisorIds = new Set<string>()
 let readingRuns: Promise<void> | undefined
 
 async function opensRun($: EngineInterface, id: string): Promise<boolean> {
@@ -314,6 +317,10 @@ async function opensRun($: EngineInterface, id: string): Promise<boolean> {
       .then(messages => {
         for (const [key, value] of runStarts(messages)) {
           runStartsById.set(key, value)
+        }
+
+        for (const key of rowsAboveAdvisor(messages)) {
+          aboveAdvisorIds.add(key)
         }
       })
       .catch(() => undefined)
@@ -329,6 +336,31 @@ async function opensRun($: EngineInterface, id: string): Promise<boolean> {
 // The blank line a tool row owns above it: one when it opens a run of tool rows, else none.
 async function lineAbove($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
   return surface === 'terminal' && id !== undefined && (await opensRun($, id)) ? 1 : 0
+}
+
+// The blank line a tool row gives back below it: the advisor's, when its row is drawn right
+// under. A row drawn before the advisor lands learns it from the atom, a resume from the transcript.
+async function lineBelow($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
+  if (surface !== 'terminal' || id === undefined) {
+    return 0
+  }
+
+  const isLanded = await read($, memberOf(aboveAdvisorAtom, { requestId: id }))
+  await opensRun($, id)
+
+  return isLanded || aboveAdvisorIds.has(id) ? -1 : 0
+}
+
+// Marks the rows an advisor call just landed under, read from the transcript that holds it.
+async function markAboveAdvisor($: EngineInterface, agentId: string | undefined): Promise<void> {
+  const messages = await $.session.messages({ as: 'api', ...(agentId === undefined ? {} : { agentId }) })
+
+  for (const id of rowsAboveAdvisor(messages)) {
+    if (!aboveAdvisorIds.has(id)) {
+      aboveAdvisorIds.add(id)
+      await update($, memberOf(aboveAdvisorAtom, { requestId: id }), () => true)
+    }
+  }
 }
 
 // Whether each reply sits right under a notification, an agent's message, the advisor or a
@@ -829,6 +861,10 @@ export const register: Register = on => {
       await update($, memberOf(imagesAtom, { requestId: stored.uuid }), () => true)
     }
 
+    if (e.message.content.some(block => block.type === 'server_tool_use' && block.name === 'advisor')) {
+      await markAboveAdvisor($, e.agentId).catch(error => $.ui.log(`advisor row: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' }))
+    }
+
     return stored
   })
 
@@ -1077,7 +1113,9 @@ export const register: Register = on => {
     const row = toolRow(look, e.props, kind, target, meta, label, touch)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
     const above = await lineAbove($, e.surface, e.props.tool_use_id)
-    const placed = (drawn: RenderElement) => (above === 0 ? drawn : <look.ui.Box flexDirection="column" marginTop={above}>{drawn}</look.ui.Box>)
+    const below = await lineBelow($, e.surface, e.props.tool_use_id)
+    const placed = (drawn: RenderElement) =>
+      above === 0 && below === 0 ? drawn : <look.ui.Box flexDirection="column" marginTop={above} marginBottom={below}>{drawn}</look.ui.Box>
 
     if (!isAnswered) {
       return withSettle($, e, placed(disclosedRow(look, row, false, toggle)))
@@ -1130,7 +1168,10 @@ export const register: Register = on => {
     const ui = $.ui.resolve(e)
     const row = groupRow(lookOf(ui, active, e.surface), e.props.calls)
 
-    return (await lineAbove($, e.surface, e.props.calls[0]?.tool_use_id)) === 0 ? row : <ui.Box flexDirection="column" marginTop={1}>{row}</ui.Box>
+    const above = await lineAbove($, e.surface, e.props.calls[0]?.tool_use_id)
+    const below = await lineBelow($, e.surface, e.props.calls.at(-1)?.tool_use_id)
+
+    return above === 0 && below === 0 ? row : <ui.Box flexDirection="column" marginTop={above} marginBottom={below}>{row}</ui.Box>
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
