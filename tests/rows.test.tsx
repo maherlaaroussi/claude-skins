@@ -302,6 +302,29 @@ test('an agent and a stopped task keep Claude Code’s row, tight inside a run; 
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
+// Claude Code draws a question's row from its answer, with a blank line above it: one inside a
+// run gives it back, one that opens a run keeps it.
+test('a question’s answer row sits tight inside a run and keeps its blank line when it opens one', async ($, on) => {
+  stubEngine(on)
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', content: [{ type: 'text', text: 'draw the workflow' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1' }] },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: '' }, { type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'q1' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'One more call to make.' }, { type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }] },
+    ] as never,
+  }))
+
+  for (const [id, tight] of [['q1', true], ['q2', false]] as const) {
+    const answer = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'ToolResult', requestId: id, props: { tool_use_id: id, tool: 'AskUserQuestion', output: {}, isErrored: false } })
+    expect(await answer.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+    expect(blankLines(await answer.find({ type: 'Box' })), id).toEqual(tight ? ['marginTop: -1'] : [])
+    await answer.unmount()
+  }
+})
+
 // Claude Code draws the advisor's row with a blank line above it and no hook to take it back,
 // so the tool row right above gives it back, once the advisor lands and on a resume.
 test('the tool row right above the advisor gives back the advisor’s blank line', async ($, on) => {
