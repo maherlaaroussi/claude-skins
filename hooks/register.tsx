@@ -1176,6 +1176,14 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const active = await activeSkin($)
+
+    // Claude Code draws a question's row from its answer, with a blank line above it that the
+    // ToolUse hook cannot reach: inside a run the answer gives it back.
+    if (e.props.tool === 'AskUserQuestion' && active !== null && e.surface === 'terminal' && !(await opensRun($, e.props.tool_use_id))) {
+      const { Box } = $.ui.resolve(e)
+
+      return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
+    }
     const output = e.props.output as { stdout?: unknown } | null
     const copy = (text: string) => {
       void $.ui.copy({ text, surface: e.surface }).then(result => $.ui.toast(result.isCopied ? 'Copied' : 'Could not copy here'))
