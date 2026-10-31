@@ -1,4 +1,4 @@
-import type { On, RenderElement } from 'claude-code'
+import type { AgentInfo, On, RenderElement } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Plugin } from 'claude-code/testing'
 
@@ -271,24 +271,34 @@ test('a prompt, a reply and the turn footer each own the blank line above them, 
   expect(blankLines(await footer.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
 })
 
-// Claude Code puts a blank line above its own rows (an agent, a stopped task): one that opens
-// a run keeps it, one inside a run gives it back.
-test('an agent and a stopped task keep Claude Code’s row, tight inside a run; Skill and task calls get the skin’s row', async ($, on) => {
+// Claude Code puts a blank line above its own tool rows, a question's answer, a notification
+// and an agent's message: the skin takes it back on the terminal, whatever precedes them.
+// A tool search draws nothing, so it is not wrapped.
+test('Claude Code’s own rows give back their blank line on the terminal; Skill and task calls get the skin’s row', async ($, on) => {
   stubEngine(on)
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', content: [{ type: 'text', text: 'dig' }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'g1', name: 'Agent', input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'g1' }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 's1', name: 'TaskStop', input: {} }] },
-    ] as never,
-  }))
 
   for (const surface of SURFACES) {
-    for (const [id, tool, tight] of [['g1', 'Agent', false], ['s1', 'TaskStop', true]] as const) {
-      const row = await $.ui.mount(toolUse(call(tool, { description: 'dig' }, { tool_use_id: id }), surface))
+    const tight = surface === 'terminal' ? ['marginTop: -1'] : []
+
+    for (const [tool, lines] of [['Agent', tight], ['TaskStop', tight], ['ToolSearch', []]] as const) {
+      const row = await $.ui.mount(toolUse(call(tool, { description: 'dig' }, { tool_use_id: `c-${tool}` }), surface))
       expect(await row.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: ${tool}`).toEqual(surface === 'terminal' && tight ? ['marginTop: -1'] : [])
+      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: ${tool}`).toEqual(lines)
+      await row.unmount()
+    }
+
+    const answer = await $.ui.mount({ ...SITE, surface, component: 'ToolResult', requestId: `q-${surface}`, props: { tool_use_id: 'q1', tool: 'AskUserQuestion', output: {}, isErrored: false } })
+    expect(await answer.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+    expect(blankLines(await answer.find({ type: 'Box' })), `${surface}: AskUserQuestion`).toEqual(tight)
+    await answer.unmount()
+
+    for (const [i, extra] of [
+      { origin: { kind: 'task-notification' }, task: { id: 'a7', status: 'completed' } },
+      { origin: { kind: 'unclassified' }, from: { name: 'devi-comment-sicko' } },
+    ].entries()) {
+      const row = await $.ui.mount({ ...SITE, surface, component: 'UserMessage', requestId: `n${i}${surface}`, props: { text: 'Agent "dig" finished', isExpanded: false, ...extra } as never })
+      expect(await row.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: notice ${i}`).toEqual(tight)
       await row.unmount()
     }
   }
@@ -302,144 +312,33 @@ test('an agent and a stopped task keep Claude Code’s row, tight inside a run; 
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
-// Claude Code draws a question's row from its answer, with a blank line above it: one inside a
-// run gives it back, one that opens a run keeps it.
-test('a question’s answer row sits tight inside a run and keeps its blank line when it opens one', async ($, on) => {
+// A reply the skin draws owns the blank line above it on the terminal; Claude Code's own
+// drawing of one keeps its line.
+test('a reply the skin draws owns the blank line above it on the terminal, none on the desktop', async ($, on) => {
   stubEngine(on)
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', content: [{ type: 'text', text: 'draw the workflow' }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1' }] },
-      { role: 'assistant', content: [{ type: 'thinking', thinking: '' }, { type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'q1' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'One more call to make.' }, { type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: {} }] },
-    ] as never,
-  }))
-
-  for (const [id, tight] of [['q1', true], ['q2', false]] as const) {
-    const answer = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'ToolResult', requestId: id, props: { tool_use_id: id, tool: 'AskUserQuestion', output: {}, isErrored: false } })
-    expect(await answer.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-    expect(blankLines(await answer.find({ type: 'Box' })), id).toEqual(tight ? ['marginTop: -1'] : [])
-    await answer.unmount()
-  }
-})
-
-// Claude Code draws the advisor's row with a blank line above it and no hook to take it back,
-// so the tool row right above gives it back, once the advisor lands and on a resume.
-test('the tool row right above the advisor gives back the advisor’s blank line', async ($, on) => {
-  stubEngine(on)
-  const advisor = { type: 'server_tool_use', id: 's1', name: 'advisor', input: {} }
-  const before = [
-    { role: 'user', content: [{ type: 'text', text: 'build the bakeoff' }] },
-    { role: 'assistant', content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } }] },
-    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'b1' }] },
-  ]
-  let agentMessages = before
-  on('agent.list', () => ({ value: [{ id: 'a7' }] }))
-  on('session.messages', ($, e) => ({
-    value: (e.agentId === 'a7'
-      ? agentMessages
-      : [
-          { role: 'user', content: [{ type: 'text', text: 'dig' }] },
-          { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: {} }, { type: 'tool_use', id: 'r2', name: 'Read', input: {} }] },
-          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1' }, { type: 'tool_result', tool_use_id: 'r2' }] },
-          { role: 'assistant', content: [advisor] },
-        ]) as never,
-  }))
-
-  const calls = [call('Read', {}, { tool_use_id: 'r1' }), call('Read', {}, { tool_use_id: 'r2' })]
-  const group = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'ToolGroup', requestId: 'g1', props: { calls, isActive: false, isExpanded: false } })
-  expect(blankLines(await group.find({ type: 'Box' })), 'a group opening a run, on a resume').toEqual(['marginTop: 1', 'marginBottom: -1'])
-  await group.unmount()
-
-  const row = await $.ui.mount(toolUse(call('Bash', { command: 'ls' }, { tool_use_id: 'b1' })))
-  expect(blankLines(await row.find({ type: 'Box' }))).toEqual([])
-
-  agentMessages = [...before, { role: 'assistant', content: [advisor] }]
-  const landed = { door: 'response', agentId: 'a7', message: { type: 'assistant', role: 'assistant', content: [advisor] } } as never
-
-  // An older kit (the pinned CI build) cannot append a row at all: nothing to check there.
-  if (!(await $.session.append(landed).then(() => true, () => false))) {
-    return
-  }
-
-  expect(blankLines(await row.find({ type: 'Box' })), 'drawn again once the advisor lands, in an agent’s view').toEqual(['marginBottom: -1'])
-})
-
-// An agent's message and a task's notification sit right under the row above them, and the
-// reply under one of them, or under a nested CLAUDE.md load, sits right under it.
-test('an agent’s message, a notification and the reply under one own no blank line', async ($, on) => {
-  stubEngine(on)
-  on('agent.list', () => ({ value: [{ id: 'a7' }] }))
-  on('session.messages', ($, e) => ({
-    value:
-      e.agentId === 'a7'
-        ? [
-            { role: 'user', content: [{ type: 'text', text: 'read the screens' }] },
-            { role: 'assistant', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: {} }] },
-            { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1' }, { type: 'text', text: '<system-reminder>\nContents of /work/CLAUDE.md:\n\n@AGENTS.md\n</system-reminder>\n' }] },
-            { role: 'assistant', content: [{ type: 'text', text: 'Now the filter bars.' }] },
-          ]
-        : [
-            { role: 'user', content: [{ type: 'text', text: 'review it' }] },
-            { role: 'assistant', content: [{ type: 'text', text: 'Waiting on the reviewers.' }] },
-            { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "dig" finished</summary>\n</task-notification>' }] },
-            { role: 'assistant', content: [{ type: 'text', text: 'The **first** reviewer found nothing.' }] },
-          ],
-  }))
-
-  const rows = [
-    { origin: { kind: 'task-notification' }, task: { id: 'a7', status: 'completed' } },
-    { origin: { kind: 'unclassified' }, from: { name: 'devi-comment-sicko' } },
-  ]
-
-  for (const [i, extra] of rows.entries()) {
-    for (const surface of SURFACES) {
-      const row = await $.ui.mount({ ...SITE, surface, component: 'UserMessage', requestId: `n${i}${surface}`, props: { text: 'Agent "dig" finished', isExpanded: false, ...extra } as never })
-      expect(await row.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-      expect(blankLines(await row.find({ type: 'Box' })), `${surface}: row ${i}`).toEqual(surface === 'terminal' ? ['marginTop: -1'] : [])
-      await row.unmount()
-    }
-  }
-
-  const reply = async (text: string) => {
-    const drawn = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: text, props: { text, isFirstOfReply: true } })
+  const reply = async (surface: (typeof SURFACES)[number], text: string) => {
+    const drawn = await $.ui.mount({ ...SITE, surface, component: 'AssistantMessage', requestId: `${surface}${text}`, props: { text, isFirstOfReply: true } })
     const lines = blankLines(await drawn.find({ type: 'Box' }))
     await drawn.unmount()
 
     return lines
   }
 
-  expect(await reply('The **first** reviewer found nothing.')).toEqual([])
-  expect(await reply('Now the filter bars.'), 'under a CLAUDE.md load, in an agent’s view').toEqual([])
-  expect(await reply('Waiting on the reviewers.')).toEqual(['marginTop: 1'])
+  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toEqual(['marginTop: 1'])
+  expect(await reply('desktop', 'The **first** reviewer found nothing.')).toEqual([])
 
-  // Claude Code's own drawing gives back the line it puts above.
   await runSkin($, 'markdown off')
-  expect(await reply('Now the filter bars.')).toEqual(['marginTop: -1'])
-  expect(await reply('Waiting on the reviewers.')).toEqual([])
+  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toEqual([])
 })
 
-// While background agents still run, the turn's footer sits right under its reply. The reply
-// a turn ends on once none runs is the final one: it owns the blank line above it, under a
-// notification too, and its footer the one below it.
-test('the final reply and its footer breathe, a turn that leaves agents running stays tight', async ($, on) => {
+// A turn's footer owns the blank line above it, unless background agents still ran when the
+// turn ended: it then sits right under what that turn drew.
+test('the footer owns its blank line, a turn that left agents running stays tight', async ($, on) => {
   stubEngine(on)
-  let agents = [{ id: 'a1', status: 'running' }]
+  let agents: AgentInfo[] = [{ id: 'a1', description: 'dig', type: 'general-purpose', status: 'running' }]
   on('agent.list', () => ({ value: agents }))
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', content: [{ type: 'text', text: 'review it' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'Waiting on the reviewers.' }] },
-      { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "dig" finished</summary>\n</task-notification>' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'One down, one to go.' }] },
-      { role: 'user', content: [{ type: 'text', text: '<task-notification>\n<summary>Agent "docs" finished</summary>\n</task-notification>' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'Both reviews are in.' }] },
-    ],
-  }))
   on('turn.complete', () => ({ text: '' }))
-  const turn = { isAborted: false, reason: 'answer' } as const
+  const turn = { isAborted: false, reason: 'answer', answer: 'Done.' } as const
   const footer = async (durationMs: number) => {
     const drawn = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'TurnDuration', requestId: `f${durationMs}`, props: { word: 'Baked', durationMs } })
     const lines = blankLines(await drawn.find({ type: 'Box' }))
@@ -448,59 +347,13 @@ test('the final reply and its footer breathe, a turn that leaves agents running 
     return lines
   }
 
-  // Enough longer turns to fill what the skin keeps, so a short one is not the first dropped.
-  for (let i = 0; i < 40; i++) {
-    await $.turn.complete({ ...turn, turnId: `old${i}`, answer: 'Reading.', durationMs: 100_000 + i })
-  }
+  await $.turn.complete({ ...turn, turnId: 't1', durationMs: 5000 })
+  agents = [{ ...agents[0]!, status: 'completed' }]
+  await $.turn.complete({ ...turn, turnId: 't2', durationMs: 9000 })
 
-  await $.turn.complete({ ...turn, turnId: 't1', answer: 'Waiting on the reviewers.', durationMs: 5000 })
-  agents = [{ id: 'a1', status: 'waiting' }]
-  await $.turn.complete({ ...turn, turnId: 't2', answer: 'One down, one to go.', durationMs: 6000 })
   expect(await footer(5000)).toEqual([])
-  expect(await footer(6000)).toEqual([])
-
-  const mid = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'r2', props: { text: 'One down, one to go.', isFirstOfReply: true } })
-  expect(blankLines(await mid.find({ type: 'Box' }))).toEqual([])
-
-  const final = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'r3', props: { text: 'Both reviews are in.', isFirstOfReply: true } })
-  expect(blankLines(await final.find({ type: 'Box' })), 'still streaming, under a notification').toEqual([])
-
-  agents = [{ id: 'a1', status: 'completed' }]
-  await $.turn.complete({ ...turn, turnId: 't3', answer: 'Reading the second review.\n\nBoth reviews are in.', durationMs: 9000 })
-  expect(blankLines(await final.find({ type: 'Box' })), 'drawn again once the turn ends').toEqual(['marginTop: 1'])
   expect(await footer(9000)).toEqual(['marginTop: 1'])
-
-  await $.turn.complete({ ...turn, turnId: 't4', answer: 'Anything else?', durationMs: 200_000 })
-  expect(blankLines(await final.find({ type: 'Box' })), 'kept past the next turn').toEqual(['marginTop: 1'])
-  expect(await footer(5000), 'kept past the next turn').toEqual([])
   expect(await footer(64000), 'a turn this session did not see').toEqual(['marginTop: 1'])
-})
-
-// The first tool row after a prompt, a reply, thinking or a block Claude Code draws (an
-// agent's) owns the blank line above it; the rows after it in the run own none.
-test('a tool row that opens a run owns the blank line above it, the rows after it none', async ($, on) => {
-  stubEngine(on)
-  const uses = (...ids: string[]) => ids.map(id => ({ type: 'tool_use', id, name: id.startsWith('g') ? 'Agent' : 'Bash', input: {} }))
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', content: [{ type: 'text', text: 'fix the build' }] },
-      { role: 'assistant', content: uses('r1', 'r2') },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1' }, { type: 'tool_result', tool_use_id: 'r2' }] },
-      { role: 'assistant', content: [{ type: 'thinking', thinking: 'Now an agent.', signature: 'sig' }, ...uses('g3', 'r4', 'r5')] },
-    ] as never,
-  }))
-  const row = async (id: string, tool = 'Bash') => {
-    const ui = await $.ui.mount(toolUse(call(tool, { command: 'ls', description: 'dig' }, { tool_use_id: id })))
-    const lines = blankLines(await ui.find({ type: 'Box' }))
-    await ui.unmount()
-
-    return lines
-  }
-
-  expect(await row('r1')).toEqual(['marginTop: 1'])
-  expect(await row('r2')).toEqual([])
-  expect(await row('r4'), 'under an agent').toEqual([])
-  expect(await row('r5')).toEqual([])
 })
 
 test('a folded group is one node, an expanded one keeps its rows', async ($, on) => {

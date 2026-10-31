@@ -27,7 +27,7 @@ import { hunksOf } from './svg-diff'
 import { shellOutputOf } from './svg-terminal'
 import { countdownsOf, limitLabel, metersOf } from './svg-usage'
 import { shortenPath } from './format'
-import { isHidden, kindOf, repliesUnderNotices, rowsAboveAdvisor, runStarts, summarize, toolLabel } from './tools'
+import { isHidden, kindOf, summarize, toolLabel } from './tools'
 import { commandOf, errorLine, isQuiet, quietLabel } from './quiet'
 import { MAX_MARKDOWN, replySegments } from './reply'
 import { isDue, isNewer, LATEST_URL, STAR_NOTICE, starStep, updateNotice, versionOf } from './updates'
@@ -87,11 +87,9 @@ const touchedAtom = atom({ plugin: 'skins', key: 'touched' } as const, {} as Rec
 const foldsAtom = atom({ plugin: 'skins', key: 'folds' } as const, [] as string[])
 // The main loop's last answer, for `/skin copy`.
 const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
-// Per main-loop turn, oldest first, its duration and the answer it ended on once no background
-// agent ran, null while one still did. A list: an object would order its numeric keys by size.
-const turnEndsAtom = atom({ plugin: 'skins', key: 'turnEnds' } as const, [] as [number, string | null][])
-// Each tool row the advisor's row landed right under, so a row drawn before it is drawn again.
-const aboveAdvisorAtom = atom({ plugin: 'skins', key: 'aboveAdvisor' } as const, false)
+// Per main-loop turn, oldest first, its duration and whether a background agent still ran when
+// it ended. A list: an object would order its numeric keys by size.
+const turnEndsAtom = atom({ plugin: 'skins', key: 'turnEnds' } as const, [] as [number, boolean][])
 const ALIVE = new Set<AgentStatus>(['pending', 'running', 'waiting'])
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
@@ -302,106 +300,6 @@ const drawingOf = (e: { surface: RenderSurface; requestId: string }): string => 
 
 // What Claude Code's `isExpanded` read when a group was first drawn under `expand`.
 const groupStarts = new Map<string, boolean>()
-
-// Whether each tool call opens a run of tool rows, by tool_use_id, read from the transcript
-// once for every call it holds; the rows a resume draws at once share the one read. A host
-// that cannot read the transcript leaves every row in the run before it, as before.
-const runStartsById = new Map<string, boolean>()
-const aboveAdvisorIds = new Set<string>()
-let readingRuns: Promise<void> | undefined
-
-async function opensRun($: EngineInterface, id: string): Promise<boolean> {
-  if (!runStartsById.has(id)) {
-    readingRuns ??= $.session
-      .messages({ as: 'api' })
-      .then(messages => {
-        for (const [key, value] of runStarts(messages)) {
-          runStartsById.set(key, value)
-        }
-
-        for (const key of rowsAboveAdvisor(messages)) {
-          aboveAdvisorIds.add(key)
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        readingRuns = undefined
-      })
-    await readingRuns
-  }
-
-  return runStartsById.get(id) ?? false
-}
-
-// The blank line a tool row owns above it: one when it opens a run of tool rows, else none.
-async function lineAbove($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
-  return surface === 'terminal' && id !== undefined && (await opensRun($, id)) ? 1 : 0
-}
-
-// The blank line a tool row gives back below it: the advisor's, when its row is drawn right
-// under. A row drawn before the advisor lands learns it from the atom, a resume from the transcript.
-async function lineBelow($: EngineInterface, surface: RenderSurface, id: string | undefined): Promise<number> {
-  if (surface !== 'terminal' || id === undefined) {
-    return 0
-  }
-
-  const isLanded = await read($, memberOf(aboveAdvisorAtom, { requestId: id }))
-  await opensRun($, id)
-
-  return isLanded || aboveAdvisorIds.has(id) ? -1 : 0
-}
-
-// Marks the rows an advisor call just landed under, read from the transcript that holds it.
-async function markAboveAdvisor($: EngineInterface, agentId: string | undefined): Promise<void> {
-  const messages = await $.session.messages({ as: 'api', ...(agentId === undefined ? {} : { agentId }) })
-
-  for (const id of rowsAboveAdvisor(messages)) {
-    if (!aboveAdvisorIds.has(id)) {
-      aboveAdvisorIds.add(id)
-      await update($, memberOf(aboveAdvisorAtom, { requestId: id }), () => true)
-    }
-  }
-}
-
-// Whether each reply sits right under a notification, an agent's message, the advisor or a
-// CLAUDE.md load, by its text, read from the main transcript, then every agent's on a miss: an
-// agent's view draws its own. A host that cannot read them leaves every reply its blank line,
-// as does an agent the engine no longer lists.
-const underNoticeByText = new Map<string, boolean>()
-let readingReplies: Promise<void> | undefined
-
-async function readReplies($: EngineInterface, key: string): Promise<void> {
-  const learn = (messages: unknown) => {
-    for (const [said, value] of Array.isArray(messages) ? repliesUnderNotices(messages) : []) {
-      underNoticeByText.set(said, value)
-    }
-  }
-
-  learn(await $.session.messages({ as: 'api' }))
-
-  if (!underNoticeByText.has(key)) {
-    const agents = await $.agent.list()
-
-    for (const messages of await Promise.all(agents.map(agent => $.session.messages({ as: 'api', agentId: agent.id })))) {
-      learn(messages)
-    }
-  }
-}
-
-async function isUnderNotice($: EngineInterface, text: string): Promise<boolean> {
-  const key = text.trim()
-
-  if (!underNoticeByText.has(key)) {
-    readingReplies ??= readReplies($, key)
-      .catch(() => undefined)
-      .finally(() => {
-        readingReplies = undefined
-      })
-    await readingReplies
-  }
-
-  return underNoticeByText.get(key) ?? false
-}
 
 const drawnBy = (drawing: string, drawnAt: number) => (key: string, entranceMs: number) => {
   const card = `${drawing}:${key}`
@@ -861,10 +759,6 @@ export const register: Register = on => {
       await update($, memberOf(imagesAtom, { requestId: stored.uuid }), () => true)
     }
 
-    if (e.message.content.some(block => block.type === 'server_tool_use' && block.name === 'advisor')) {
-      await markAboveAdvisor($, e.agentId).catch(error => $.ui.log(`advisor row: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' }))
-    }
-
     return stored
   })
 
@@ -890,8 +784,8 @@ export const register: Register = on => {
 
       // A host that cannot list its agents has every turn end on its final answer.
       const agents = await $.agent.list().catch(() => [])
-      const ending = agents.some(agent => ALIVE.has(agent.status)) ? null : e.answer.trim()
-      await update($, turnEndsAtom, ends => [...ends, [e.durationMs, ending] as [number, string | null]].slice(-KEPT_TURNS))
+      const isAgentAlive = agents.some(agent => ALIVE.has(agent.status))
+      await update($, turnEndsAtom, ends => [...ends, [e.durationMs, isAgentAlive] as [number, boolean]].slice(-KEPT_TURNS))
     }
 
     return next(e)
@@ -1069,8 +963,9 @@ export const register: Register = on => {
     const kind = kindOf(e.props.tool)
     const active = await activeSkin($)
 
-    // Claude Code's own row keeps its drawing, less the blank line it puts above it inside a run.
-    if (kind === null && active !== null && e.surface === 'terminal' && !isHidden(e.props.tool) && !(await opensRun($, e.props.tool_use_id))) {
+    // Claude Code's own row keeps its drawing, less the blank line it puts above it: a tool row
+    // owns none.
+    if (kind === null && active !== null && e.surface === 'terminal' && !isHidden(e.props.tool)) {
       const { Box } = $.ui.resolve(e)
 
       return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
@@ -1112,13 +1007,9 @@ export const register: Register = on => {
     const label = active.prefs.quiet && isQuiet(e.props.tool, e.props.input) ? quietLabel(e.props.tool) : toolLabel(e.props.tool)
     const row = toolRow(look, e.props, kind, target, meta, label, touch)
     const toggle = () => void update($, disclosure, () => (open ? 'closed' : 'open'))
-    const above = await lineAbove($, e.surface, e.props.tool_use_id)
-    const below = await lineBelow($, e.surface, e.props.tool_use_id)
-    const placed = (drawn: RenderElement) =>
-      above === 0 && below === 0 ? drawn : <look.ui.Box flexDirection="column" marginTop={above} marginBottom={below}>{drawn}</look.ui.Box>
 
     if (!isAnswered) {
-      return withSettle($, e, placed(disclosedRow(look, row, false, toggle)))
+      return withSettle($, e, disclosedRow(look, row, false, toggle))
     }
 
     const all = memberOf(allAtom, e)
@@ -1135,7 +1026,7 @@ export const register: Register = on => {
       stock: () => next(e),
     })
 
-    return withSettle($, e, placed(disclosedRow(look, row, open, toggle, opened)))
+    return withSettle($, e, disclosedRow(look, row, open, toggle, opened))
   })
 
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
@@ -1166,20 +1057,16 @@ export const register: Register = on => {
     }
 
     const ui = $.ui.resolve(e)
-    const row = groupRow(lookOf(ui, active, e.surface), e.props.calls)
 
-    const above = await lineAbove($, e.surface, e.props.calls[0]?.tool_use_id)
-    const below = await lineBelow($, e.surface, e.props.calls.at(-1)?.tool_use_id)
-
-    return above === 0 && below === 0 ? row : <ui.Box flexDirection="column" marginTop={above} marginBottom={below}>{row}</ui.Box>
+    return groupRow(lookOf(ui, active, e.surface), e.props.calls)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const active = await activeSkin($)
 
     // Claude Code draws a question's row from its answer, with a blank line above it that the
-    // ToolUse hook cannot reach: inside a run the answer gives it back.
-    if (e.props.tool === 'AskUserQuestion' && active !== null && e.surface === 'terminal' && !(await opensRun($, e.props.tool_use_id))) {
+    // ToolUse hook cannot reach: the answer gives it back.
+    if (e.props.tool === 'AskUserQuestion' && active !== null && e.surface === 'terminal') {
       const { Box } = $.ui.resolve(e)
 
       return <Box flexDirection="column" marginTop={-1}>{await next(e)}</Box>
@@ -1320,21 +1207,13 @@ export const register: Register = on => {
 
     const { prefs } = active
     const segments = replySegments(text, prefs, e.surface)
-    // The answer a turn ends on once no agent runs is the final one: it stands apart. The answer
-    // holds the whole last response, so the reply is its end. Only a reply under a notice reads
-    // the turn ends, so a turn's end redraws no other.
-    const isTight =
-      e.surface === 'terminal' &&
-      (await isUnderNotice($, text)) &&
-      !(await read($, turnEndsAtom)).some(([, answer]) => answer?.endsWith(text.trim()) === true)
     const ui = $.ui.resolve(e)
 
     // A reply skin-code draws is its: Claude Code may run either mod's hook first, and this
     // keeps the code in the person's VS Code theme whichever it is. skin-code draws the
-    // prose around it through `$.skins.markdown`. Under a notice it gives back the blank
-    // line Claude Code puts above it.
+    // prose around it through `$.skins.markdown`.
     if (segments === null || (await drawnBySkinCode($, text))) {
-      return isTight ? <ui.Box flexDirection="column" marginTop={-1}>{await next(e)}</ui.Box> : next(e)
+      return next(e)
     }
 
     // Every surface's table names Svg, but the terminal draws it as nothing. As text, tables
@@ -1351,9 +1230,8 @@ export const register: Register = on => {
     // A reply of several blocks can be copied whole, as Claude wrote it.
     const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
 
-    // On the terminal a reply owns the blank line above it, as Claude Code's own does, unless
-    // it sits under a notice.
-    return withSettle($, e, e.surface === 'terminal' && !isTight ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
+    // On the terminal a reply owns the blank line above it, as Claude Code's own does.
+    return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
   })
 
   // A slash command's output (`/cost`, `/context`, a plugin's) drawn the way a reply is: its
@@ -1431,7 +1309,7 @@ export const register: Register = on => {
 
     // On the terminal the footer owns the blank line above it, as a reply does, unless its turn
     // left background agents running: it then sits right under what that turn drew.
-    const isTight = (await read($, turnEndsAtom)).findLast(([ms]) => ms === e.props.durationMs)?.[1] === null
+    const isTight = (await read($, turnEndsAtom)).findLast(([ms]) => ms === e.props.durationMs)?.[1] === true
 
     return e.surface === 'terminal' && !isTight ? <ui.Box marginTop={1}>{footer}</ui.Box> : footer
   })
