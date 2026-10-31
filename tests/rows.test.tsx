@@ -544,7 +544,7 @@ test('the markdown pack draws alerts and task lists everywhere, headings and par
     ({ ...SITE, surface, component: 'AssistantMessage', requestId: `md-${surface}`, props: { text, isFirstOfReply: true } }) as const
 
   const terminal = await $.ui.mount(reply('terminal'))
-  expect(await terminal.find({ type: 'Text', text: '▍ Plan' })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: '▌ PLAN' })).toBeDefined()
   expect(spanColor((await terminal.find({ type: 'Text', text: /Ran 54 tests/ })) as Found, '3.2s')).toBe('#f5f5f5')
   expect(await terminal.find({ type: 'Text', text: '▲ Warning' })).toBeDefined()
   expect(JSON.stringify(await terminal.find({ type: 'Box' }))).toContain('"borderStyle":"round"')

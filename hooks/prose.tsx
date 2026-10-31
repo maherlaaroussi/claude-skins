@@ -85,7 +85,7 @@ function headingRow(look: Look, level: number, text: string) {
 
   return (
     <Text color={level <= 2 ? palette.user : palette.fg} bold underline={level === 1}>
-      {level <= 2 ? `${look.prefs.icons === 'ascii' ? '#' : '▍'} ${text}` : text}
+      {level <= 2 ? `${look.prefs.icons === 'ascii' ? '#' : level === 1 ? '█' : '▌'} ${text.toUpperCase()}` : text.toUpperCase()}
     </Text>
   )
 }
