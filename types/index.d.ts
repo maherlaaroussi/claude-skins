@@ -138,8 +138,6 @@ declare module 'claude-code' {
       pinned: boolean
       settle: number
       lastReply: string
-      // Per main-loop turn, its duration and whether a background agent still ran when it ended.
-      turnEnds: [number, boolean][]
     }
   }
 }

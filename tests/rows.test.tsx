@@ -255,7 +255,7 @@ test('a tool row owns no blank line, closed, opened or under its card', async ($
   expect(blankLines(await card.find({ type: 'Box' }))).toEqual([])
 })
 
-test('a prompt, a reply and the turn footer each own the blank line above them, none below', async ($, on) => {
+test('a prompt owns the blank line above it, a reply one above and below, the footer none', async ($, on) => {
   stubEngine(on)
 
   const prompt = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'UserMessage', requestId: 'p1', props: { text: 'fix the build', origin: { kind: 'composer' }, isExpanded: false } })
@@ -265,10 +265,10 @@ test('a prompt, a reply and the turn footer each own the blank line above them, 
   const text = '```ts\nconst a = 1\n```\n\nThen:\n\n| a | b |\n|---|---|\n| 1 | 2 |'
   const reply = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'AssistantMessage', requestId: 'a1', props: { text, isFirstOfReply: true } })
   expect(await reply.find({ type: 'Text', text: 'Then:' })).toBeDefined()
-  expect(blankLines(await reply.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
+  expect(blankLines(await reply.find({ type: 'Box' }))).toEqual(['marginY: 1'])
 
   const footer = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'TurnDuration', requestId: 'f1', props: { word: 'Baked', durationMs: 64000 } })
-  expect(blankLines(await footer.find({ type: 'Box' }))).toEqual(['marginTop: 1'])
+  expect(blankLines(await footer.find({ type: 'Box' }))).toEqual([])
 })
 
 // Claude Code puts a blank line above its own tool rows, a question's answer, a notification
@@ -312,9 +312,9 @@ test('Claude Code’s own rows give back their blank line on the terminal; Skill
   expect(await skill.find({ type: 'Text', text: /Skill {2}devi:commit/ })).toBeDefined()
 })
 
-// A reply the skin draws owns the blank line above it on the terminal; Claude Code's own
-// drawing of one keeps its line.
-test('a reply the skin draws owns the blank line above it on the terminal, none on the desktop', async ($, on) => {
+// A reply owns a blank line above and below it on the terminal. The skin's drawing asks for
+// both; Claude Code's own has the one above, so the skin adds the one below.
+test('a reply owns the blank line above and below it on the terminal, none on the desktop', async ($, on) => {
   stubEngine(on)
   const reply = async (surface: (typeof SURFACES)[number], text: string) => {
     const drawn = await $.ui.mount({ ...SITE, surface, component: 'AssistantMessage', requestId: `${surface}${text}`, props: { text, isFirstOfReply: true } })
@@ -324,36 +324,23 @@ test('a reply the skin draws owns the blank line above it on the terminal, none 
     return lines
   }
 
-  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toEqual(['marginTop: 1'])
+  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toEqual(['marginY: 1'])
   expect(await reply('desktop', 'The **first** reviewer found nothing.')).toEqual([])
 
   await runSkin($, 'markdown off')
-  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toEqual([])
+  expect(await reply('terminal', 'The **first** reviewer found nothing.')).toContain('marginBottom: 1')
+  expect(await reply('desktop', 'The **first** reviewer found nothing.')).toEqual([])
 })
 
-// A turn's footer owns the blank line above it, unless background agents still ran when the
-// turn ended: it then sits right under what that turn drew.
-test('the footer owns its blank line, a turn that left agents running stays tight', async ($, on) => {
+// The reply above gives the footer its blank line, so the footer asks for none.
+test('the footer has no margin on either surface', async ($, on) => {
   stubEngine(on)
-  let agents: AgentInfo[] = [{ id: 'a1', description: 'dig', type: 'general-purpose', status: 'running' }]
-  on('agent.list', () => ({ value: agents }))
-  on('turn.complete', () => ({ text: '' }))
-  const turn = { isAborted: false, reason: 'answer', answer: 'Done.' } as const
-  const footer = async (durationMs: number) => {
-    const drawn = await $.ui.mount({ ...SITE, surface: 'terminal', component: 'TurnDuration', requestId: `f${durationMs}`, props: { word: 'Baked', durationMs } })
-    const lines = blankLines(await drawn.find({ type: 'Box' }))
+
+  for (const surface of SURFACES) {
+    const drawn = await $.ui.mount({ ...SITE, surface, component: 'TurnDuration', requestId: `f${surface}`, props: { word: 'Baked', durationMs: 5000 } })
+    expect(blankLines(await drawn.find({ type: 'Box' })), surface).toEqual([])
     await drawn.unmount()
-
-    return lines
   }
-
-  await $.turn.complete({ ...turn, turnId: 't1', durationMs: 5000 })
-  agents = [{ ...agents[0]!, status: 'completed' }]
-  await $.turn.complete({ ...turn, turnId: 't2', durationMs: 9000 })
-
-  expect(await footer(5000)).toEqual([])
-  expect(await footer(9000)).toEqual(['marginTop: 1'])
-  expect(await footer(64000), 'a turn this session did not see').toEqual(['marginTop: 1'])
 })
 
 test('a folded group is one node, an expanded one keeps its rows', async ($, on) => {

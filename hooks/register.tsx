@@ -1,5 +1,5 @@
 import { atom, memberOf, read, update } from 'claude-code'
-import type { AgentStatus, EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
 
 import type { CustomSkin, Disclosure, Prefs, SkinSlot, SkinsMarkdownArgs, Touch, TurnStats, UsageSnap } from '../types'
 import { DEFAULT_PREFS, listing, nextTables, parsePrefs, runSkinCommand, TOGGLES, withCalm } from './command'
@@ -87,10 +87,6 @@ const touchedAtom = atom({ plugin: 'skins', key: 'touched' } as const, {} as Rec
 const foldsAtom = atom({ plugin: 'skins', key: 'folds' } as const, [] as string[])
 // The main loop's last answer, for `/skin copy`.
 const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
-// Per main-loop turn, oldest first, its duration and whether a background agent still ran when
-// it ended. A list: an object would order its numeric keys by size.
-const turnEndsAtom = atom({ plugin: 'skins', key: 'turnEnds' } as const, [] as [number, boolean][])
-const ALIVE = new Set<AgentStatus>(['pending', 'running', 'waiting'])
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 const WRITES = new Set([...EDITS, 'NotebookEdit'])
@@ -781,11 +777,6 @@ export const register: Register = on => {
       if (e.answer.trim() !== '') {
         await update($, lastReplyAtom, () => e.answer)
       }
-
-      // A host that cannot list its agents has every turn end on its final answer.
-      const agents = await $.agent.list().catch(() => [])
-      const isAgentAlive = agents.some(agent => ALIVE.has(agent.status))
-      await update($, turnEndsAtom, ends => [...ends, [e.durationMs, isAgentAlive] as [number, boolean]].slice(-KEPT_TURNS))
     }
 
     return next(e)
@@ -1213,7 +1204,11 @@ export const register: Register = on => {
     // keeps the code in the person's VS Code theme whichever it is. skin-code draws the
     // prose around it through `$.skins.markdown`.
     if (segments === null || (await drawnBySkinCode($, text))) {
-      return next(e)
+      // On the terminal a reply owns a blank line above and below it. Claude Code's drawing has
+      // the one above, so it gets the one below.
+      const own = await next(e)
+
+      return e.surface === 'terminal' ? <ui.Box flexDirection="column" marginBottom={1}>{own}</ui.Box> : own
     }
 
     // Every surface's table names Svg, but the terminal draws it as nothing. As text, tables
@@ -1230,8 +1225,7 @@ export const register: Register = on => {
     // A reply of several blocks can be copied whole, as Claude wrote it.
     const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
 
-    // On the terminal a reply owns the blank line above it, as Claude Code's own does.
-    return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginTop={1}>{reply}</ui.Box> : reply)
+    return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginY={1}>{reply}</ui.Box> : reply)
   })
 
   // A slash command's output (`/cost`, `/context`, a plugin's) drawn the way a reply is: its
@@ -1304,14 +1298,7 @@ export const register: Register = on => {
     const turns = await read($, turnsAtom)
     const word = active.prefs.words === 'claude' ? e.props.word : (pick(active.skin.done, e.props.word) ?? e.props.word)
 
-    const ui = $.ui.resolve(e)
-    const footer = footerRow(lookOf(ui, active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
-
-    // On the terminal the footer owns the blank line above it, as a reply does, unless its turn
-    // left background agents running: it then sits right under what that turn drew.
-    const isTight = (await read($, turnEndsAtom)).findLast(([ms]) => ms === e.props.durationMs)?.[1] === true
-
-    return e.surface === 'terminal' && !isTight ? <ui.Box marginTop={1}>{footer}</ui.Box> : footer
+    return footerRow(lookOf($.ui.resolve(e), active, e.surface), word, e.props.durationMs, turns[String(e.props.durationMs)])
   })
 
   // The band above the prompt: context and plan limits. Another mod's drawing there,
