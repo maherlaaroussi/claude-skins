@@ -779,6 +779,24 @@ export function replyRows(look: Look, segments: readonly Segment[], maxWidth: nu
   )
 }
 
+// Text Claude wrote on the way to its answer: its prose and headings in the muted colour.
+export function dimmed(look: Look): Look {
+  const { palette } = look.skin
+
+  return { ...look, skin: { ...look.skin, palette: { ...palette, fg: palette.muted, user: palette.muted } } }
+}
+
+// The line above a turn's answer, across the transcript, so its start is found at a glance.
+export function answerRule(look: Look, columns: number) {
+  const { Text } = look.ui
+
+  return (
+    <Text color={look.skin.palette.user} wrap="truncate-end">
+      {(look.prefs.icons === 'ascii' ? '-' : '─').repeat(columns)}
+    </Text>
+  )
+}
+
 // The word with a band of light sweeping through it, one letter a frame.
 export function spinnerRow(look: Look, word: string, frame: number, elapsedMs: number) {
   const { Text } = look.ui

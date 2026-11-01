@@ -137,7 +137,7 @@ declare module 'claude-code' {
       compacting: boolean
       pinned: boolean
       settle: number
-      lastReply: string
+      answers: string[]
     }
   }
 }

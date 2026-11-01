@@ -14,7 +14,7 @@ import { disclosedRow, openedRows } from './detail-rows'
 import { copyOf } from './markdown'
 import { CHART_HINT } from './mermaid'
 import { commandSegments } from './command-output'
-import { askBand, desktopSpinnerRow, diffCard, footerRow, terminalCard, usageBand, groupRow, promptRow, quietResult, replyRows, spinnerRow, toolRow } from './rows'
+import { answerRule, askBand, desktopSpinnerRow, diffCard, dimmed, footerRow, terminalCard, usageBand, groupRow, promptRow, quietResult, replyRows, spinnerRow, toolRow } from './rows'
 import type { Look, SvgElement, Ui } from './rows'
 import { galleryPane } from './gallery'
 import { keepsOwnRow, SHELLS, shellResultOf } from './shell'
@@ -85,8 +85,9 @@ const allAtom = atom({ plugin: 'skins', key: 'showAll' } as const, false)
 const touchedAtom = atom({ plugin: 'skins', key: 'touched' } as const, {} as Record<string, Touch>)
 // Per drawing, the blocks the person unfolded.
 const foldsAtom = atom({ plugin: 'skins', key: 'folds' } as const, [] as string[])
-// The main loop's last answer, for `/skin copy`.
-const lastReplyAtom = atom({ plugin: 'skins', key: 'lastReply' } as const, '')
+// The main loop's final answers, oldest first: the last one for `/skin copy`, all of them to
+// tell a turn's answer from the text Claude wrote on the way to it.
+const answersAtom = atom({ plugin: 'skins', key: 'answers' } as const, [] as string[])
 
 const EDITS = new Set(['Edit', 'MultiEdit', 'Write'])
 const WRITES = new Set([...EDITS, 'NotebookEdit'])
@@ -775,7 +776,7 @@ export const register: Register = on => {
       )
 
       if (e.answer.trim() !== '') {
-        await update($, lastReplyAtom, () => e.answer)
+        await update($, answersAtom, answers => [...answers, e.answer.trim()].slice(-KEPT_TURNS))
       }
     }
 
@@ -850,7 +851,7 @@ export const register: Register = on => {
     const word = e.args.trim().toLowerCase()
 
     if (word === 'copy' || word === 'copy code') {
-      const copied = copyOf(await read($, lastReplyAtom), word === 'copy code')
+      const copied = copyOf((await read($, answersAtom)).at(-1) ?? '', word === 'copy code')
 
       if ('message' in copied) {
         $.ui.toast(copied.message)
@@ -1199,6 +1200,12 @@ export const register: Register = on => {
     const { prefs } = active
     const segments = replySegments(text, prefs, e.surface)
     const ui = $.ui.resolve(e)
+    // Until its turn ends a block may be followed by tool calls, so every block is drawn as
+    // text on the way to the answer, and the answer lights up once the turn hands it over.
+    const block = text.trim()
+    const answers = block === '' ? [] : await read($, answersAtom)
+    const isAnswer = answers.some(answer => answer.includes(block))
+    const rule = e.surface === 'terminal' && answers.some(answer => answer.startsWith(block)) ? answerRule(lookOf(ui, active, e.surface), e.viewport?.columns ?? 100) : null
 
     // A reply skin-code draws is its: Claude Code may run either mod's hook first, and this
     // keeps the code in the person's VS Code theme whichever it is. skin-code draws the
@@ -1207,6 +1214,15 @@ export const register: Register = on => {
       // On the terminal a reply owns a blank line above and below it. Claude Code's drawing has
       // the one above, so it gets the one below.
       const own = await next(e)
+
+      if (rule !== null) {
+        return (
+          <ui.Box flexDirection="column" marginY={1}>
+            {rule}
+            {own}
+          </ui.Box>
+        )
+      }
 
       return e.surface === 'terminal' ? <ui.Box flexDirection="column" marginBottom={1}>{own}</ui.Box> : own
     }
@@ -1220,10 +1236,22 @@ export const register: Register = on => {
     }
 
     const base = await sessionLook($, e, lookOf(ui, active, e.surface, copy), replyNeeds(text, segments))
-    const look = base.svg === undefined ? base : { ...base, isFirstDraw: await firstDraws($, e, prefs) }
+    const lit = isAnswer ? base : dimmed(base)
+    const look = lit.svg === undefined ? lit : { ...lit, isFirstDraw: await firstDraws($, e, prefs) }
 
     // A reply of several blocks can be copied whole, as Claude wrote it.
     const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
+
+    if (rule !== null) {
+      return withSettle(
+        $,
+        e,
+        <ui.Box flexDirection="column" marginY={1} rowGap={1}>
+          {rule}
+          {reply}
+        </ui.Box>,
+      )
+    }
 
     return withSettle($, e, e.surface === 'terminal' ? <ui.Box flexDirection="column" marginY={1}>{reply}</ui.Box> : reply)
   })

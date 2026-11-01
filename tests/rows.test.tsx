@@ -332,6 +332,40 @@ test('a reply owns the blank line above and below it on the terminal, none on th
   expect(await reply('desktop', 'The **first** reviewer found nothing.')).toEqual([])
 })
 
+// Until the turn ends every block is drawn muted: tool calls may still follow it. The turn's
+// answer then lights up, under a line that marks where it starts; earlier text stays muted.
+test('text on the way to the answer is muted, and the answer lights up under a line once the turn ends', async ($, on) => {
+  stubEngine(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const { fg, muted, user } = noir.palette
+  const rule = { type: 'Text', text: /^─+$/ } as const
+  const mount = (requestId: string, text: string, surface: (typeof SURFACES)[number] = 'terminal') =>
+    $.ui.mount({ ...SITE, surface, component: 'AssistantMessage', requestId, props: { text, isFirstOfReply: true } })
+
+  await runSkin($, 'noir')
+  const aside = await mount('w1', 'Reading the **build** script first.')
+  const answer = await mount('w2', 'The **build** passes now.')
+  expect(spanColor(await answer.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(muted)
+  expect(await answer.find(rule)).toBeUndefined()
+
+  await $.turn.complete({ durationMs: 1000, isAborted: false, reason: 'answer', turnId: 't1', answer: 'The **build** passes now.\n' })
+
+  expect(spanColor(await answer.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(fg)
+  expect((await answer.find(rule))?.props.color).toBe(user)
+  expect(blankLines(await answer.find({ type: 'Box' }))).toEqual(['marginY: 1'])
+  expect(spanColor(await aside.find({ type: 'Text', text: /script first/ }), 'build')).toBe(muted)
+  expect(await aside.find(rule)).toBeUndefined()
+
+  const desktop = await mount('w3', 'The **build** passes now.', 'desktop')
+  expect(await desktop.find(rule), 'box-drawing needs the terminal’s monospace font').toBeUndefined()
+
+  await runSkin($, 'markdown off')
+  const own = await mount('w4', 'The **build** passes now.')
+  expect(await own.find({ type: 'Text', text: 'stock row' })).toBeDefined()
+  expect(await own.find(rule)).toBeDefined()
+  expect(blankLines(await own.find({ type: 'Box' }))).toEqual(['marginY: 1'])
+})
+
 // The reply above gives the footer its blank line, so the footer asks for none.
 test('the footer has no margin on either surface', async ($, on) => {
   stubEngine(on)
@@ -543,6 +577,8 @@ test('the markdown pack draws alerts and task lists everywhere, headings and par
   const reply = (surface: (typeof SURFACES)[number]) =>
     ({ ...SITE, surface, component: 'AssistantMessage', requestId: `md-${surface}`, props: { text, isFirstOfReply: true } }) as const
 
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.turn.complete({ durationMs: 1000, isAborted: false, reason: 'answer', turnId: 't1', answer: text })
   const terminal = await $.ui.mount(reply('terminal'))
   expect(await terminal.find({ type: 'Text', text: '▌ PLAN' })).toBeDefined()
   expect(spanColor((await terminal.find({ type: 'Text', text: /Ran 54 tests/ })) as Found, '3.2s')).toBe('#f5f5f5')
