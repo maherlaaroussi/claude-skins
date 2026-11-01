@@ -333,8 +333,9 @@ test('a reply owns the blank line above and below it on the terminal, none on th
 })
 
 // Until the turn ends every block is drawn muted: tool calls may still follow it. The turn's
-// answer then lights up, under a line that marks where it starts; earlier text stays muted.
-test('text on the way to the answer is muted, and the answer lights up under a line once the turn ends', async ($, on) => {
+// answer then lights up between two lines that mark where it starts and ends; earlier text
+// stays muted. `/skin answer off` drops the lines and keeps the muting.
+test('text on the way to the answer is muted, and the answer lights up between two lines once the turn ends', async ($, on) => {
   stubEngine(on)
   on('turn.complete', ($, e) => ({ text: e.answer }))
   const { fg, muted } = noir.palette
@@ -352,6 +353,7 @@ test('text on the way to the answer is muted, and the answer lights up under a l
 
   expect(spanColor(await answer.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(fg)
   expect((await answer.find(rule))?.props).toMatchObject({ color: muted, dimColor: true })
+  expect(await answer.findAll(rule), 'a line above the answer and one below').toHaveLength(2)
   expect(blankLines(await answer.find({ type: 'Box' }))).toEqual(['marginY: 1'])
   expect(spanColor(await aside.find({ type: 'Text', text: /script first/ }), 'build')).toBe(muted)
   expect(await aside.find(rule)).toBeUndefined()
@@ -359,11 +361,17 @@ test('text on the way to the answer is muted, and the answer lights up under a l
   const desktop = await mount('w3', 'The **build** passes now.', 'desktop')
   expect(await desktop.find(rule), 'box-drawing needs the terminal’s monospace font').toBeUndefined()
 
+  await runSkin($, 'answer off')
+  const plain = await mount('w5', 'The **build** passes now.')
+  expect(spanColor(await plain.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(fg)
+  expect(await plain.find(rule)).toBeUndefined()
+  await runSkin($, 'answer on')
+
   await runSkin($, 'markdown off')
   const own = await mount('w4', 'The **build** passes now.')
   expect(await own.find({ type: 'Text', text: 'stock row' })).toBeDefined()
-  expect(await own.find(rule)).toBeDefined()
-  expect(blankLines(await own.find({ type: 'Box' }))).toEqual(['marginY: 1'])
+  expect(await own.findAll(rule)).toHaveLength(2)
+  expect(blankLines(await own.find({ type: 'Box' }))).toEqual(['marginY: 1', 'marginTop: 1'])
 })
 
 // The reply above gives the footer its blank line, so the footer asks for none.

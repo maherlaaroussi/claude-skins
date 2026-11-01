@@ -786,7 +786,7 @@ export function dimmed(look: Look): Look {
   return { ...look, skin: { ...look.skin, palette: { ...palette, fg: palette.muted, user: palette.muted } } }
 }
 
-// The faint dotted line above a turn's answer, across the transcript, so its start is found at a glance.
+// The faint dotted line above and below a turn's answer, across the transcript, so it is found at a glance.
 export function answerRule(look: Look, columns: number) {
   const { Text } = look.ui
 

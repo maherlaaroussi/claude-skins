@@ -88,6 +88,7 @@ Built-in skins: `noir`, `tokyo-night`, `dracula`, `catppuccin`, `rose-pine`, `no
 | Part | What it does |
 |---|---|
 | `rail` | The coloured rail beside tool rows |
+| `answer` | Faint dotted lines above and below a turn's answer, on the terminal |
 | `shimmer` | The band of light across the spinner word |
 | `band` | The usage meters above the prompt |
 | `countdown` | Time left on each limit in the band |
@@ -153,7 +154,7 @@ Drawn by the mod's own card code (`scripts/previews.ts`), not screenshots.
 | Command output | `/cost`, `/context` and plugin output: tables, code and `key: value` runs as cards | The same as cell grids |
 | Alerts and task lists | `> [!NOTE]` as a titled box, `- [ ]` with ticks and a done count | The same |
 | Code blocks | Card with language, line numbers, highlighting; shell blocks keep the Run button | Framed, the language on the frame, highlighted in the skin's colours: TS/JS, JSON, shells, PowerShell, Python, Rust, Go, C/C++, C#, F#, Java, YAML, TOML, HTML/XML, CSS, SQL, diff, Markdown, Lua (`/skin highlight off` for Claude Code's own) |
-| The turn's answer | Text the skin draws stays muted until the turn ends, then the answer lights up | Text on the way to the answer is muted; once the turn ends the answer lights up under a faint dotted line |
+| The turn's answer | Text the skin draws stays muted until the turn ends, then the answer lights up | Text on the way to the answer is muted; once the turn ends the answer lights up between two faint dotted lines (`/skin answer off` drops them) |
 | Spinner | Animated icon per phase | The skin's word with a band of light |
 | Above the prompt | Context and plan-limit rings, Compact button, nudge at 70% | Block meters, same button |
 | Your prompts | Claude Code's own, so copy, rewind and selection stay | Rounded outline, or a plain marker |
@@ -212,7 +213,7 @@ scripts/bench.sh
 | Sequence, state, class and ER diagrams on the desktop | A code card: only the terminal's vendored layout draws them | `artKind` in [`hooks/mermaid-art.ts`](hooks/mermaid-art.ts), `parseMermaid` in [`hooks/mermaid.ts`](hooks/mermaid.ts) |
 | Korean, Chinese, Japanese or other wide characters in a terminal diagram's node id or state name (`A[開始] --> 請求`) | The code: the vendored layout drops such nodes. Wide labels draw as art | `drawsWide` in [`hooks/mermaid-art.ts`](hooks/mermaid-art.ts); test "a diagram the renderer cannot lay out with wide characters falls back to code" |
 | A diagram too wide or too long (over 80 lines or 8,000 characters on the terminal) | Rows for flowchart, xy and pie, else the code | test "a diagram too wide for the terminal falls back to rows…" |
-| Text on the way to the answer that Claude Code draws itself (paragraphs on the desktop, `/skin markdown off`) | Claude Code's own colours, not muted; the terminal still draws the line above the answer | `dimmed` in [`hooks/rows.tsx`](hooks/rows.tsx); test "text on the way to the answer is muted…" |
+| Text on the way to the answer that Claude Code draws itself (paragraphs on the desktop, `/skin markdown off`) | Claude Code's own colours, not muted; the terminal still draws the lines around the answer | `dimmed` in [`hooks/rows.tsx`](hooks/rows.tsx); test "text on the way to the answer is muted…" |
 | A reply block over 9,000 characters, a prompt over 4,000 | Claude Code's own drawing of the whole message | `MAX_MARKDOWN`, `MAX_PROMPT` in [`hooks/register.tsx`](hooks/register.tsx) |
 | Code cards past 80 lines | The first 80 and a `N more lines` note; Copy takes all of it | `MAX_LINES` in [`hooks/svg-code.ts`](hooks/svg-code.ts) |
 | TeX commands the parser does not know | Drawn as written, `\name` | [`hooks/math.ts`](hooks/math.ts) |

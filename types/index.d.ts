@@ -28,6 +28,8 @@ export type Prefs = {
   // whatever the skin says; 'skin' draws the skin's.
   words: 'claude' | 'skin'
   rail: boolean
+  // The faint lines above and below a turn's answer, on the terminal.
+  answer: boolean
   // 'text' keeps the skin but draws tables and code as text the desktop can select.
   tables: 'on' | 'text' | 'off'
   shimmer: boolean

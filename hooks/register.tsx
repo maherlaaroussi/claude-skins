@@ -638,7 +638,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'skin',
       description: 'Open the skin settings, or /skin <name | list | help | off>',
-      argumentHint: '[help | gallery | copy | copy code | name | list | off | calm | pin | unpin | share | rail | tables | shimmer | band | countdown | clip | markdown | quiet | charts | math | commands | shell | highlight | hints | links | fold | expand | compact | icons | prompt | words]',
+      argumentHint: '[help | gallery | copy | copy code | name | list | off | calm | pin | unpin | share | rail | answer | tables | shimmer | band | countdown | clip | markdown | quiet | charts | math | commands | shell | highlight | hints | links | fold | expand | compact | icons | prompt | words]',
       immediate: true,
     })
     const designTool = $.tool
@@ -1205,7 +1205,10 @@ export const register: Register = on => {
     const block = text.trim()
     const answers = block === '' ? [] : await read($, answersAtom)
     const isAnswer = answers.some(answer => answer.includes(block))
-    const rule = e.surface === 'terminal' && answers.some(answer => answer.startsWith(block)) ? answerRule(lookOf(ui, active, e.surface), e.viewport?.columns ?? 100) : null
+    const lines = e.surface === 'terminal' && prefs.answer
+    const rule = lines && isAnswer ? answerRule(lookOf(ui, active, e.surface), e.viewport?.columns ?? 100) : null
+    const above = rule !== null && answers.some(answer => answer.startsWith(block)) ? rule : null
+    const below = rule !== null && answers.some(answer => answer.endsWith(block)) ? rule : null
 
     // A reply skin-code draws is its: Claude Code may run either mod's hook first, and this
     // keeps the code in the person's VS Code theme whichever it is. skin-code draws the
@@ -1215,11 +1218,12 @@ export const register: Register = on => {
       // the one above, so it gets the one below.
       const own = await next(e)
 
-      if (rule !== null) {
+      if (above !== null || below !== null) {
         return (
           <ui.Box flexDirection="column" marginY={1}>
-            {rule}
+            {above}
             {own}
+            {below === null ? null : <ui.Box marginTop={1}>{below}</ui.Box>}
           </ui.Box>
         )
       }
@@ -1242,13 +1246,14 @@ export const register: Register = on => {
     // A reply of several blocks can be copied whole, as Claude wrote it.
     const reply = replyRows(look, segments, e.viewport?.columns ?? 100, svg, segments.length > 1 ? text : undefined)
 
-    if (rule !== null) {
+    if (above !== null || below !== null) {
       return withSettle(
         $,
         e,
         <ui.Box flexDirection="column" marginY={1} rowGap={1}>
-          {rule}
+          {above}
           {reply}
+          {below}
         </ui.Box>,
       )
     }
