@@ -79,9 +79,11 @@ function lineRow(look: Look, line: Line) {
   )
 }
 
-function headingRow(look: Look, level: number, text: string) {
+function headingRow(look: Look, written: number, text: string) {
   const { Text } = look.ui
   const { palette } = look.skin
+  // Claude does not write `#`, so `##` takes its look and every deeper level the one above it.
+  const level = Math.max(1, written - 1)
 
   return (
     <Text color={level <= 2 ? palette.user : palette.fg} bold underline={level === 1}>
