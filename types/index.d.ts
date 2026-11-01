@@ -30,6 +30,8 @@ export type Prefs = {
   rail: boolean
   // The faint lines above and below a turn's answer, on the terminal.
   answer: boolean
+  // Text Claude writes on the way to a turn's answer drawn in the muted colour.
+  dim: boolean
   // 'text' keeps the skin but draws tables and code as text the desktop can select.
   tables: 'on' | 'text' | 'off'
   shimmer: boolean

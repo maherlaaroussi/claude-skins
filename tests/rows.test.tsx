@@ -367,6 +367,11 @@ test('text on the way to the answer is muted, and the answer lights up between t
   expect(await plain.find(rule)).toBeUndefined()
   await runSkin($, 'answer on')
 
+  await runSkin($, 'dim off')
+  const full = await mount('w6', 'Reading the **build** script first.')
+  expect(spanColor(await full.find({ type: 'Text', text: /script first/ }), 'build'), 'dim off keeps text on the way in full colour').toBe(fg)
+  await runSkin($, 'dim on')
+
   await runSkin($, 'markdown off')
   const own = await mount('w4', 'The **build** passes now.')
   expect(await own.find({ type: 'Text', text: 'stock row' })).toBeDefined()

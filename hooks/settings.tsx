@@ -104,6 +104,7 @@ export function settingsPane(look: Look, ui: PaneUi, model: SettingsModel, actio
         <Text color={palette.muted}>Look</Text>
         {toggle('rail', 'r', prefs.rail)}
         {toggle('answer', 'v', prefs.answer)}
+        {toggle('dim', 'z', prefs.dim)}
         <Button
           key="tables"
           label={`tables ${prefs.tables}`}

@@ -638,7 +638,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'skin',
       description: 'Open the skin settings, or /skin <name | list | help | off>',
-      argumentHint: '[help | gallery | copy | copy code | name | list | off | calm | pin | unpin | share | rail | answer | tables | shimmer | band | countdown | clip | markdown | quiet | charts | math | commands | shell | highlight | hints | links | fold | expand | compact | icons | prompt | words]',
+      argumentHint: '[help | gallery | copy | copy code | name | list | off | calm | pin | unpin | share | rail | answer | dim | tables | shimmer | band | countdown | clip | markdown | quiet | charts | math | commands | shell | highlight | hints | links | fold | expand | compact | icons | prompt | words]',
       immediate: true,
     })
     const designTool = $.tool
@@ -1240,7 +1240,7 @@ export const register: Register = on => {
     }
 
     const base = await sessionLook($, e, lookOf(ui, active, e.surface, copy), replyNeeds(text, segments))
-    const lit = isAnswer ? base : dimmed(base)
+    const lit = isAnswer || !prefs.dim ? base : dimmed(base)
     const look = lit.svg === undefined ? lit : { ...lit, isFirstDraw: await firstDraws($, e, prefs) }
 
     // A reply of several blocks can be copied whole, as Claude wrote it.
