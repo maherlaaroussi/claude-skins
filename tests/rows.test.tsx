@@ -351,7 +351,7 @@ test('text on the way to the answer is muted, and the answer lights up under a l
   await $.turn.complete({ durationMs: 1000, isAborted: false, reason: 'answer', turnId: 't1', answer: 'The **build** passes now.\n' })
 
   expect(spanColor(await answer.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(fg)
-  expect((await answer.find(rule))?.props.color).toBe(muted)
+  expect((await answer.find(rule))?.props).toMatchObject({ color: muted, dimColor: true })
   expect(blankLines(await answer.find({ type: 'Box' }))).toEqual(['marginY: 1'])
   expect(spanColor(await aside.find({ type: 'Text', text: /script first/ }), 'build')).toBe(muted)
   expect(await aside.find(rule)).toBeUndefined()

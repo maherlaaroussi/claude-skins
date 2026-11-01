@@ -791,7 +791,7 @@ export function answerRule(look: Look, columns: number) {
   const { Text } = look.ui
 
   return (
-    <Text color={look.skin.palette.muted} wrap="truncate-end">
+    <Text color={look.skin.palette.muted} dimColor wrap="truncate-end">
       {(look.prefs.icons === 'ascii' ? '-' : '┄').repeat(columns)}
     </Text>
   )
