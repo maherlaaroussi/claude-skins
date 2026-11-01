@@ -786,13 +786,13 @@ export function dimmed(look: Look): Look {
   return { ...look, skin: { ...look.skin, palette: { ...palette, fg: palette.muted, user: palette.muted } } }
 }
 
-// The line above a turn's answer, across the transcript, so its start is found at a glance.
+// The faint dotted line above a turn's answer, across the transcript, so its start is found at a glance.
 export function answerRule(look: Look, columns: number) {
   const { Text } = look.ui
 
   return (
-    <Text color={look.skin.palette.user} wrap="truncate-end">
-      {(look.prefs.icons === 'ascii' ? '-' : '─').repeat(columns)}
+    <Text color={look.skin.palette.muted} wrap="truncate-end">
+      {(look.prefs.icons === 'ascii' ? '-' : '┄').repeat(columns)}
     </Text>
   )
 }

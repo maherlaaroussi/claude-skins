@@ -153,7 +153,7 @@ Drawn by the mod's own card code (`scripts/previews.ts`), not screenshots.
 | Command output | `/cost`, `/context` and plugin output: tables, code and `key: value` runs as cards | The same as cell grids |
 | Alerts and task lists | `> [!NOTE]` as a titled box, `- [ ]` with ticks and a done count | The same |
 | Code blocks | Card with language, line numbers, highlighting; shell blocks keep the Run button | Framed, the language on the frame, highlighted in the skin's colours: TS/JS, JSON, shells, PowerShell, Python, Rust, Go, C/C++, C#, F#, Java, YAML, TOML, HTML/XML, CSS, SQL, diff, Markdown, Lua (`/skin highlight off` for Claude Code's own) |
-| The turn's answer | Text the skin draws stays muted until the turn ends, then the answer lights up | Text on the way to the answer is muted; once the turn ends the answer lights up under a line in the accent colour |
+| The turn's answer | Text the skin draws stays muted until the turn ends, then the answer lights up | Text on the way to the answer is muted; once the turn ends the answer lights up under a faint dotted line |
 | Spinner | Animated icon per phase | The skin's word with a band of light |
 | Above the prompt | Context and plan-limit rings, Compact button, nudge at 70% | Block meters, same button |
 | Your prompts | Claude Code's own, so copy, rewind and selection stay | Rounded outline, or a plain marker |

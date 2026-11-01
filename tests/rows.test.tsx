@@ -337,8 +337,8 @@ test('a reply owns the blank line above and below it on the terminal, none on th
 test('text on the way to the answer is muted, and the answer lights up under a line once the turn ends', async ($, on) => {
   stubEngine(on)
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  const { fg, muted, user } = noir.palette
-  const rule = { type: 'Text', text: /^─+$/ } as const
+  const { fg, muted } = noir.palette
+  const rule = { type: 'Text', text: /^┄+$/ } as const
   const mount = (requestId: string, text: string, surface: (typeof SURFACES)[number] = 'terminal') =>
     $.ui.mount({ ...SITE, surface, component: 'AssistantMessage', requestId, props: { text, isFirstOfReply: true } })
 
@@ -351,7 +351,7 @@ test('text on the way to the answer is muted, and the answer lights up under a l
   await $.turn.complete({ durationMs: 1000, isAborted: false, reason: 'answer', turnId: 't1', answer: 'The **build** passes now.\n' })
 
   expect(spanColor(await answer.find({ type: 'Text', text: /passes now/ }), 'build')).toBe(fg)
-  expect((await answer.find(rule))?.props.color).toBe(user)
+  expect((await answer.find(rule))?.props.color).toBe(muted)
   expect(blankLines(await answer.find({ type: 'Box' }))).toEqual(['marginY: 1'])
   expect(spanColor(await aside.find({ type: 'Text', text: /script first/ }), 'build')).toBe(muted)
   expect(await aside.find(rule)).toBeUndefined()
